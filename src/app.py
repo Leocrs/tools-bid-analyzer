@@ -1,5 +1,4 @@
 import streamlit as st
-import os
 from pathlib import Path
 from utils.file_utils import handle_uploaded_files, validate_file_type
 
@@ -27,8 +26,14 @@ st.markdown("""
         font-size: 2rem;
         font-weight: 700;
     }
+    .main-header h3 {
+        color: #f0f8f0;
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 400;
+    }
 </style>
-""", unsafe_allow_html=True^)
+""", unsafe_allow_html=True)
 
 # Header principal
 st.markdown("""
@@ -36,7 +41,7 @@ st.markdown("""
     <h1>🔨 TOOLS Engenharia</h1>
     <h3>Agente de Suprimentos - Análise de BID</h3>
 </div>
-""", unsafe_allow_html=True^)
+""", unsafe_allow_html=True)
 
 # Upload de arquivos
 uploaded_files = st.file_uploader(
