@@ -98,6 +98,10 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
+    st.markdown("#### Arquivos carregados:")
+    for file in uploaded_files:
+        st.write(f"- **{file.name}** ({file.type}, {file.size/1024:.1f} KB)")
+    
     if st.button("🔍 Solicitar Análise com IA", type="primary"):
         with st.spinner("🤖 Processando documentos e realizando análise com IA..."):
             result = handle_uploaded_files(uploaded_files)
