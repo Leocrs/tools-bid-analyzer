@@ -2,11 +2,12 @@ import pandas as pd
 import streamlit as st
 from pathlib import Path
 import logging
-import openai
+# import openai (removido, não utilizado)
 import os
 from dotenv import load_dotenv
 import PyPDF2
 from io import BytesIO
+import requests
 
 # Carrega variáveis de ambiente
 load_dotenv()
@@ -16,7 +17,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuração OpenAI
-openai.api_key = os.getenv("OPENAI_API_KEY")
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")  # Chave da Hugging Face (deve estar no .env, nunca no código)
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")  # Chave da Hugging Face (deve estar no .env, nunca no código)
 
 def validate_file_type(file):
     """Valida o tipo de arquivo enviado"""
@@ -51,68 +53,66 @@ def extract_text_from_excel(file):
         logger.error(f"Erro ao extrair dados do Excel: {e}")
         return ""
 
-def analyze_with_openai(documents_text, file_types):
-    """Analisa documentos usando OpenAI GPT"""
+## Função removida: analyze_with_openai (não utilizada)
+
+def analyze_with_huggingface(documents_text, file_types):
+    """Analisa documentos usando Hugging Face Inference API"""
+    import requests
+    if not HUGGINGFACE_API_KEY:
+        logger.error("Chave da Hugging Face não encontrada no .env")
+        return "❌ Erro: Chave da Hugging Face não encontrada. Configure corretamente o arquivo .env."
     try:
-        # Prompt específico para análise de BID
-        system_prompt = """
-        Você é um agente de suprimentos da Tools Engenharia especializado em análise de BID.
-
-        ⚠️ NÃO DEVE iniciar nenhuma análise automaticamente.
-
-        📌 Seu trabalho é seguir estas etapas:
-
-        **Primeira Parte:**
-        - Avaliar se o mapa em Excel está igual às propostas
-        - Verificar se as propostas estão equalizadas
-
-        **Segunda Etapa:**
-        - Avaliar se as propostas estão aderentes ao projeto
-        - Identificar inconsistências ou omissões
-
-        **Terceira Etapa:**
-        - Montar uma base histórica com serviços já contratados para servir como referência
-        - Comparar com dados históricos quando disponível
-
-        🔎 Para cada análise:
-        1. Confirme que o mapa foi recebido
-        2. Valide se contém:
-           • Itens e quantidades
-           • Empresas participantes
-           • Valores unitários
-        3. Compare valores unitários entre fornecedores
-        4. Identifique o menor preço por item
-        5. Avalie viabilidade de contratação por mix ou fornecedor único
-        6. Aponte inconsistências ou omissões
-
-        ✅ Sua linguagem deve ser técnica e objetiva
-        ❌ Nunca assuma dados não fornecidos
-        """
-
-        user_content = f"""
-        Documentos recebidos para análise:
-        Tipos de arquivo: {', '.join(file_types)}
-
-        Conteúdo dos documentos:
-        {documents_text}
-
-        Por favor, realize a análise completa seguindo as três etapas definidas.
-        """
-
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            max_tokens=1500,
-            temperature=0.3
+        prompt = (
+            "Você é um agente de suprimentos da Tools Engenharia especializado em análise de BID.\n"
+            "⚠️ NÃO DEVE iniciar nenhuma análise automaticamente.\n"
+            "📌 Seu trabalho é seguir estas etapas:\n"
+            "**Primeira Parte:**\n"
+            "- Avaliar se o mapa em Excel está igual às propostas\n"
+            "- Verificar se as propostas estão equalizadas\n"
+            "**Segunda Etapa:**\n"
+            "- Avaliar se as propostas estão aderentes ao projeto\n"
+            "- Identificar inconsistências ou omissões\n"
+            "**Terceira Etapa:**\n"
+            "- Montar uma base histórica com serviços já contratados para servir como referência\n"
+            "- Comparar com dados históricos quando disponível\n"
+            "🔎 Para cada análise:\n"
+            "1. Confirme que o mapa foi recebido\n"
+            "2. Valide se contém: Itens e quantidades, Empresas participantes, Valores unitários\n"
+            "3. Compare valores unitários entre fornecedores\n"
+            "4. Identifique o menor preço por item\n"
+            "5. Avalie viabilidade de contratação por mix ou fornecedor único\n"
+            "6. Aponte inconsistências ou omissões\n"
+            "✅ Sua linguagem deve ser técnica e objetiva\n"
+            "❌ Nunca assuma dados não fornecidos.\n"
         )
-        
-        return response.choices[0].message.content
-        
+        user_content = f"Documentos recebidos para análise:\nTipos de arquivo: {', '.join(file_types)}\nConteúdo dos documentos:\n{documents_text}\nPor favor, realize a análise completa seguindo as três etapas definidas."
+        payload = {
+            "inputs": prompt + "\n" + user_content
+        }
+        headers = {
+            "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        endpoint = "https://api-inference.huggingface.co/models/bigscience/bloomz-3b"
+        response = requests.post(endpoint, headers=headers, json=payload, timeout=60)
+        if response.status_code == 200:
+            result = response.json()
+            if isinstance(result, list) and "generated_text" in result[0]:
+                return result[0]["generated_text"]
+            elif "generated_text" in result:
+                return result["generated_text"]
+            elif "text" in result:
+                return result["text"]
+            else:
+                return str(result)
+        elif response.status_code == 401:
+            logger.error(f"Credenciais inválidas Hugging Face: {response.text}")
+            return "❌ Erro: Credenciais inválidas para Hugging Face. Verifique se o token está correto no arquivo .env."
+        else:
+            logger.error(f"Erro Hugging Face: {response.text}")
+            return f"❌ Erro ao processar análise com IA: {response.text}"
     except Exception as e:
-        logger.error(f"Erro na análise OpenAI: {e}")
+        logger.error(f"Erro na análise Hugging Face: {e}")
         return f"❌ Erro ao processar análise com IA: {str(e)}"
 
 def analyze_excel_content(file):
@@ -234,11 +234,9 @@ def handle_uploaded_files(files):
     
     # Análise com IA
     ai_analysis = ""
-    if documents_text and openai.api_key:
-        all_validations.append("🤖 Iniciando análise com IA...")
-        ai_analysis = analyze_with_openai(documents_text, file_types)
-    elif not openai.api_key:
-        ai_analysis = "⚠️ Chave da OpenAI não configurada. Adicione sua chave no arquivo .env"
+    if documents_text:
+        all_validations.append("🤖 Iniciando análise com IA Hugging Face...")
+        ai_analysis = analyze_with_huggingface(documents_text, file_types)
     
     # Validação final
     if not has_map:
@@ -261,6 +259,6 @@ def handle_uploaded_files(files):
         "message": success_message,
         "validations": all_validations,
         "has_map": has_map,
-        "has_proposals": has_proposals,
+    "has_proposals": has_proposals,
         "ai_analysis": ai_analysis
     }

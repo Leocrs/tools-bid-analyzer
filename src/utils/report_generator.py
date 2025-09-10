@@ -14,6 +14,7 @@ import io
 import re
 import json
 
+
 class BIDReportGenerator:
     def __init__(self):
         self.analysis_data = {}
