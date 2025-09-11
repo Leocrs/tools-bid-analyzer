@@ -88,11 +88,16 @@ if 'report_data' not in st.session_state:
 
 # Upload de arquivos
 st.markdown("### 📁 Importar Documentos")
-uploaded_files = st.file_uploader(
-    "Arraste e solte os arquivos aqui ou clique para selecionar (PDF ou Excel):",
-    type=["pdf", "xlsx", "xls"],
-    accept_multiple_files=True
-)
+col_upload, _ = st.columns([1, 5])
+with col_upload:
+    st.markdown("<span style='font-size: 1.1rem; font-weight: 500;'>Drag and drop files here</span>", unsafe_allow_html=True)
+    st.markdown("<span style='font-size: 0.95rem; color: #666;'>Limit 200MB per file • PDF, XLSX, XLS</span>", unsafe_allow_html=True)
+    uploaded_files = st.file_uploader(
+        "",
+        type=["pdf", "xlsx", "xls"],
+        accept_multiple_files=True,
+        label_visibility="collapsed"
+    )
 
 if uploaded_files:
     st.markdown("#### Arquivos carregados:")
