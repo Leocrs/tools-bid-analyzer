@@ -192,6 +192,7 @@ def handle_uploaded_files(files):
     documents_text = ""
     file_types = []
     
+
     for file in files:
         file_name = file.name.lower()
         file_extension = Path(file.name).suffix.lower()
@@ -204,32 +205,17 @@ def handle_uploaded_files(files):
 
         all_validations.append(f"📁 Analisando: {file.name}")
 
-        # Extração de texto para análise IA
         mapa_validado = False
+        text_content = None
         if file_extension in ['.xlsx', '.xls']:
             text_content = extract_text_from_excel(file)
             is_valid, validations = analyze_excel_content(file)
             all_validations.extend(validations)
 
-            # Validação detalhada dos parâmetros do mapa
-            df = pd.read_excel(file)
-            columns = df.columns.str.lower()
-            itens_ok = any('item' in col for col in columns) and any('quant' in col for col in columns)
-            empresas_ok = any('empresa' in col or 'fornecedor' in col for col in columns)
-            valores_ok = any('valor' in col or 'preço' in col for col in columns)
-
             if is_valid or ('mapa' in file_name or 'concorrencia' in file_name):
                 has_map = True
                 mapa_validado = True
                 all_validations.append("🎯 Identificado como: MAPA DE CONCORRÊNCIA")
-                if not itens_ok:
-                    all_validations.append("⚠️ Mapa sem colunas de itens/quantidades!")
-                if not empresas_ok:
-                    all_validations.append("⚠️ Mapa sem empresas participantes!")
-                if not valores_ok:
-                    all_validations.append("⚠️ Mapa sem valores unitários!")
-                if itens_ok and empresas_ok and valores_ok:
-                    all_validations.append("✅ Mapa contém itens, quantidades, empresas e valores unitários.")
             else:
                 has_proposals = True
                 all_validations.append("📋 Identificado como: PROPOSTA/DOCUMENTO AUXILIAR")
@@ -239,7 +225,6 @@ def handle_uploaded_files(files):
             is_valid, validations = analyze_pdf_content(file)
             all_validations.extend(validations)
 
-            # Não é possível validar colunas, mas pode identificar pelo nome
             if 'mapa' in file_name or 'concorrencia' in file_name:
                 has_map = True
                 mapa_validado = True
@@ -248,15 +233,42 @@ def handle_uploaded_files(files):
                 has_proposals = True
                 all_validations.append("📋 Identificado como: PROPOSTA/DOCUMENTO TÉCNICO")
 
-        # Solicitar propostas comerciais se não houver
         if mapa_validado and not has_proposals:
             all_validations.append("⚠️ Propostas comerciais não enviadas. Por favor, envie os arquivos de propostas para análise comparativa.")
 
-        # Adiciona conteúdo extraído para análise IA
         if text_content:
             documents_text += f"\n\n=== {file.name} ===\n{text_content}\n"
 
         all_validations.append("---")
+
+    # Análise com IA
+    ai_analysis = ""
+    if documents_text:
+        all_validations.append("🤖 Iniciando análise com IA OpenAI...")
+        ai_analysis = analyze_with_openai(documents_text, file_types)
+
+    if not has_map:
+        return {
+            "success": False,
+            "message": "⚠️ MAPA DE CONCORRÊNCIA não identificado. Por favor, envie um arquivo contendo o mapa de concorrência com itens, quantidades e valores.",
+            "validations": all_validations,
+            "ai_analysis": ai_analysis
+        }
+
+    success_message = "✅ Documentos validados com sucesso!"
+    if has_proposals:
+        success_message += " Mapa de concorrência e propostas/documentos auxiliares identificados."
+    else:
+        success_message += " Mapa de concorrência identificado. Você pode enviar propostas comerciais adicionais para análise comparativa."
+
+    return {
+        "success": True,
+        "message": success_message,
+        "validations": all_validations,
+        "has_map": has_map,
+        "has_proposals": has_proposals,
+        "ai_analysis": ai_analysis
+    }
     
     # Análise com IA
     ai_analysis = ""

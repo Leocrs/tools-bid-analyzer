@@ -87,44 +87,42 @@ if 'report_data' not in st.session_state:
     st.session_state.report_data = None
 
 # Upload de arquivos
-st.markdown("### 📁 Importar Documentos")
-col_upload, _ = st.columns([1, 5])
-with col_upload:
-    st.markdown("<span style='font-size: 1.1rem; font-weight: 500;'>Drag and drop files here</span>", unsafe_allow_html=True)
-    st.markdown("<span style='font-size: 0.95rem; color: #666;'>Limit 200MB per file • PDF, XLSX, XLS</span>", unsafe_allow_html=True)
-    uploaded_files = st.file_uploader(
-        "",
-        type=["pdf", "xlsx", "xls"],
-        accept_multiple_files=True,
-        label_visibility="collapsed"
-    )
+
+# NOVO FLUXO: Solicitação clara dos arquivos
+st.markdown("""
+### 📁 Importação de Documentos
+Por favor, envie o mapa de concorrência (PDF ou Excel) e as propostas comerciais associadas para análise comparativa.
+""")
+
+uploaded_files = st.file_uploader(
+    "Enviar arquivos de mapa e propostas",
+    type=["pdf", "xlsx", "xls"],
+    accept_multiple_files=True,
+)
 
 if uploaded_files:
     st.markdown("#### Arquivos carregados:")
     for file in uploaded_files:
         st.write(f"- **{file.name}** ({file.type}, {file.size/1024:.1f} KB)")
-    
-    if st.button("🔍 Solicitar Análise com IA", type="primary"):
-        with st.spinner("🤖 Processando documentos e realizando análise com IA..."):
+
+    # Botão para iniciar análise SOMENTE após envio
+    if st.button("🔍 Solicitar Análise", type="primary"):
+        with st.spinner("🤖 Processando documentos e realizando análise técnica..."):
             result = handle_uploaded_files(uploaded_files)
             st.session_state.analysis_result = result
-            
+
             if result["success"]:
                 st.success("✅ Análise concluída com sucesso!")
-                
-                # Exibe validações
+
+                # Validação dos documentos
                 st.markdown("### 📋 Validação dos Documentos:")
                 for validation in result["validations"]:
                     st.markdown(f"- {validation}")
-                
-                # Exibe análise da IA
-                if result["ai_analysis"]:
-                    st.markdown("### 🤖 Análise Inteligente:")
-                    st.markdown(f'<div class="ai-analysis">{result["ai_analysis"]}</div>', unsafe_allow_html=True)
-                
-                # Gerar relatório
+
+                # Exibe apenas o relatório gerado pela IA
+                st.markdown("### 📊 Relatório Técnico gerado pela IA (OpenAI)")
+                st.markdown(f'<div class="ai-analysis">{result["ai_analysis"]}</div>', unsafe_allow_html=True)
                 st.session_state.analysis_completed = True
-                
             else:
                 st.error(result["message"])
                 if result["validations"]:
