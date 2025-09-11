@@ -196,46 +196,66 @@ def handle_uploaded_files(files):
         file_name = file.name.lower()
         file_extension = Path(file.name).suffix.lower()
         file_types.append(f"{file.name} ({file_extension})")
-        
-        # Reset file pointer
         file.seek(0)
-        
+
         if not validate_file_type(file):
             all_validations.append(f"❌ {file.name}: Tipo de arquivo não suportado")
             continue
-        
+
         all_validations.append(f"📁 Analisando: {file.name}")
-        
+
         # Extração de texto para análise IA
+        mapa_validado = False
         if file_extension in ['.xlsx', '.xls']:
             text_content = extract_text_from_excel(file)
             is_valid, validations = analyze_excel_content(file)
             all_validations.extend(validations)
-            
-            # Verifica se é um mapa de concorrência
-            if 'mapa' in file_name or 'concorrencia' in file_name or is_valid:
+
+            # Validação detalhada dos parâmetros do mapa
+            df = pd.read_excel(file)
+            columns = df.columns.str.lower()
+            itens_ok = any('item' in col for col in columns) and any('quant' in col for col in columns)
+            empresas_ok = any('empresa' in col or 'fornecedor' in col for col in columns)
+            valores_ok = any('valor' in col or 'preço' in col for col in columns)
+
+            if is_valid or ('mapa' in file_name or 'concorrencia' in file_name):
                 has_map = True
+                mapa_validado = True
                 all_validations.append("🎯 Identificado como: MAPA DE CONCORRÊNCIA")
+                if not itens_ok:
+                    all_validations.append("⚠️ Mapa sem colunas de itens/quantidades!")
+                if not empresas_ok:
+                    all_validations.append("⚠️ Mapa sem empresas participantes!")
+                if not valores_ok:
+                    all_validations.append("⚠️ Mapa sem valores unitários!")
+                if itens_ok and empresas_ok and valores_ok:
+                    all_validations.append("✅ Mapa contém itens, quantidades, empresas e valores unitários.")
             else:
                 has_proposals = True
                 all_validations.append("📋 Identificado como: PROPOSTA/DOCUMENTO AUXILIAR")
-                
+
         elif file_extension == '.pdf':
             text_content = extract_text_from_pdf(file)
             is_valid, validations = analyze_pdf_content(file)
             all_validations.extend(validations)
-            
+
+            # Não é possível validar colunas, mas pode identificar pelo nome
             if 'mapa' in file_name or 'concorrencia' in file_name:
                 has_map = True
-                all_validations.append("🎯 Identificado como: MAPA DE CONCORRÊNCIA")
+                mapa_validado = True
+                all_validations.append("🎯 Identificado como: MAPA DE CONCORRÊNCIA (PDF)")
             else:
                 has_proposals = True
                 all_validations.append("📋 Identificado como: PROPOSTA/DOCUMENTO TÉCNICO")
-        
+
+        # Solicitar propostas comerciais se não houver
+        if mapa_validado and not has_proposals:
+            all_validations.append("⚠️ Propostas comerciais não enviadas. Por favor, envie os arquivos de propostas para análise comparativa.")
+
         # Adiciona conteúdo extraído para análise IA
         if text_content:
             documents_text += f"\n\n=== {file.name} ===\n{text_content}\n"
-        
+
         all_validations.append("---")
     
     # Análise com IA
