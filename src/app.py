@@ -1,7 +1,9 @@
 import streamlit as st
 from pathlib import Path
-from utils.file_utils import handle_uploaded_files, validate_file_type
+from utils.file_utils import handle_uploaded_files
 from utils.report_generator import BIDReportGenerator
+import pandas as pd
+import json  # Importado para usar o json.dumps
 
 # Configuração da página
 st.set_page_config(
@@ -105,23 +107,42 @@ if uploaded_files:
     for file in uploaded_files:
         st.write(f"- **{file.name}** ({file.type}, {file.size/1024:.1f} KB)")
 
-    # Botão para iniciar análise SOMENTE após envio
-    if st.button("🔍 Solicitar Análise", type="primary"):
-        with st.spinner("🤖 Processando documentos e realizando análise técnica..."):
+    if st.button("🔍 Solicitar Extração dos Dados", type="primary"):
+        with st.spinner("🔄 Extraindo dados dos documentos..."):
             result = handle_uploaded_files(uploaded_files)
             st.session_state.analysis_result = result
 
             if result["success"]:
-                st.success("✅ Análise concluída com sucesso!")
-
-                # Validação dos documentos
+                st.success("✅ Extração concluída com sucesso!")
                 st.markdown("### 📋 Validação dos Documentos:")
                 for validation in result["validations"]:
                     st.markdown(f"- {validation}")
 
-                # Exibe apenas o relatório gerado pela IA
-                st.markdown("### 📊 Relatório Técnico gerado pela IA (OpenAI)")
-                st.markdown(f'<div class="ai-analysis">{result["ai_analysis"]}</div>', unsafe_allow_html=True)
+                # Exibe texto extraído dos PDFs para revisão
+                st.markdown("### 📄 Texto extraído dos PDFs (pré-IA)")
+                for arquivo, texto in result["structured_data"].items():
+                    st.markdown(f"**{arquivo}**")
+                    st.text(texto[:2000])  # Mostra os primeiros 2000 caracteres do texto extraído
+
+                st.info("Revise os dados extraídos acima. Se estiverem legíveis e completos, clique abaixo para análise com IA.")
+
+                # Botão para enviar para IA após revisão
+                if st.button("🚀 Analisar com IA"):
+                    with st.spinner("🤖 Realizando análise com IA..."):
+                        # Chame a função de análise com IA aqui, usando os dados extraídos
+                        # Exemplo: result_ia = analyze_with_openai_structured(result["structured_data"])
+                        # Adapte conforme sua função de análise
+                        result_ia = BIDReportGenerator().analyze_with_openai_structured(result["structured_data"])
+                        st.session_state.analysis_result_ia = result_ia
+
+                        if isinstance(result_ia, dict):
+                            st.success("✅ Análise da IA concluída!")
+                            st.markdown("### 📊 Relatório Técnico gerado pela IA (OpenAI)")
+                            st.json(result_ia)
+                        else:
+                            st.error("❌ Erro na análise da IA")
+                            st.write(result_ia)
+
                 st.session_state.analysis_completed = True
             else:
                 st.error(result["message"])

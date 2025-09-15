@@ -1,12 +1,12 @@
 import pandas as pd
-import streamlit as st
-from pathlib import Path
-import logging
+import PyPDF2
+import json
 import openai
 import os
 from dotenv import load_dotenv
-import PyPDF2
-from io import BytesIO
+from pathlib import Path
+import logging
+import re
 
 # Carrega variáveis de ambiente
 load_dotenv()
@@ -18,285 +18,292 @@ logger = logging.getLogger(__name__)
 # Configuração OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-def validate_file_type(file):
-    """Valida o tipo de arquivo enviado"""
-    allowed_extensions = ['.pdf', '.xlsx', '.xls', '.docx']
-    file_extension = Path(file.name).suffix.lower()
-    return file_extension in allowed_extensions
-
-def extract_text_from_pdf(file):
-    """Extrai texto de arquivo PDF"""
+def extract_text_from_pdf_complete(file):
+    """Extrai TODO o texto do PDF para análise completa"""
     try:
         file.seek(0)
-        reader = PyPDF2.PdfReader(BytesIO(file.getvalue()))
+        reader = PyPDF2.PdfReader(file)
         text = ""
         for page in reader.pages:
-            text += page.extract_text() + "\n"
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
         return text
     except Exception as e:
         logger.error(f"Erro ao extrair texto do PDF: {e}")
         return ""
 
-def extract_text_from_excel(file):
-    """Extrai dados de arquivo Excel em formato texto"""
+def identify_supplier_from_filename(filename):
+    """Identifica o fornecedor pelo nome do arquivo"""
+    filename_lower = filename.lower()
+    if "assistec" in filename_lower:
+        return "ASSISTEC"
+    elif "sulfrio" in filename_lower:
+        return "SULFRIO"
+    elif "mapa" in filename_lower:
+        return "MAPA_CONCORRENCIA"
+    else:
+        # Tenta extrair nome da empresa do início do arquivo
+        parts = filename.split(' - ')
+        if len(parts) > 0:
+            potential_company = parts[0].strip().upper()
+            return potential_company
+        return "FORNECEDOR_NAO_IDENTIFICADO"
+
+def extract_values_from_text(text):
+    """Extrai valores monetários do texto"""
+    # Padrões para valores em reais
+    patterns = [
+        r'R\$\s*([\d.,]+)',
+        r'(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)',
+        r'TOTAL[:\s]*([\d.,]+)',
+        r'VALOR[:\s]*([\d.,]+)'
+    ]
+    
+    values = []
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        values.extend(matches)
+    
+    return values
+
+def extract_items_from_text(text):
+    """Extrai itens/equipamentos do texto"""
+    # Padrões comuns para equipamentos de ar condicionado
+    patterns = [
+        r'UE-\d+[A-Z]?\s*-[^-\n]+',  # Padrão UE-01A - DESCRIÇÃO
+        r'SPLIT\s+\d+[.,]?\d*\s*BTU[/H]*',
+        r'CASSETE\s+\d+[.,]?\d*\s*BTU[/H]*',
+        r'HI\s*WALL\s+\d+[.,]?\d*\s*BTU[/H]*',
+        r'DUTO\s+\d+[.,]?\d*\s*BTU[/H]*'
+    ]
+    
+    items = []
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        items.extend(matches)
+    
+    return list(set(items))  # Remove duplicatas
+
+def extract_structured_data_real(files):
+    """Extrai dados REAIS e estruturados dos arquivos"""
+    data = {
+        "mapa_concorrencia": None,
+        "propostas": []
+    }
+    
+    for file in files:
+        supplier = identify_supplier_from_filename(file.name)
+        
+        # Determina se é Excel ou PDF
+        ext = Path(file.name).suffix.lower()
+        
+        if ext in [".xlsx", ".xls"]:
+            # Para Excel, extrai como DataFrame
+            try:
+                file.seek(0)
+                df = pd.read_excel(file)
+                content = {
+                    "tipo": "excel",
+                    "dataframe": df,
+                    "texto": df.to_string(),
+                    "valores": extract_values_from_text(df.to_string()),
+                    "itens": extract_items_from_text(df.to_string())
+                }
+            except Exception as e:
+                logger.error(f"Erro ao processar Excel {file.name}: {e}")
+                content = {"tipo": "excel", "erro": str(e)}
+        else:
+            # Para PDF, extrai texto completo
+            full_text = extract_text_from_pdf_complete(file)
+            content = {
+                "tipo": "pdf",
+                "texto_completo": full_text,
+                "valores": extract_values_from_text(full_text),
+                "itens": extract_items_from_text(full_text)
+            }
+        
+        if supplier == "MAPA_CONCORRENCIA":
+            data["mapa_concorrencia"] = {
+                "nome_arquivo": file.name,
+                "fornecedor": supplier,
+                **content
+            }
+        else:
+            data["propostas"].append({
+                "nome_arquivo": file.name,
+                "fornecedor": supplier,
+                **content
+            })
+    
+    return data
+
+def analyze_with_openai_real(data):
+    """Análise REAL dos documentos com comparação lado a lado"""
+    
+    # Prepara resumo dos fornecedores identificados
+    fornecedores = [p['fornecedor'] for p in data['propostas']]
+    
+    # Limita o texto para não exceder tokens
+    def limit_text(text, max_chars=2000):
+        return text[:max_chars] + "..." if len(text) > max_chars else text
+    
+    # Monta o prompt para análise REAL
+    prompt = f"""
+ANÁLISE REAL DE PROPOSTAS - TOOLS ENGENHARIA
+
+Você recebeu documentos REAIS de:
+- MAPA: {data['mapa_concorrencia']['nome_arquivo'] if data['mapa_concorrencia'] else 'Não fornecido'}
+- FORNECEDORES: {', '.join(fornecedores)}
+
+TAREFA: Fazer comparação LADO A LADO entre os fornecedores identificados nos documentos.
+
+EXTRAIA dos documentos e COMPARE:
+1. Itens/equipamentos específicos de cada proposta
+2. Valores unitários e totais REAIS
+3. Marcas/especificações técnicas mencionadas
+4. Quantidades de cada item
+5. Condições comerciais (prazos, pagamento)
+
+RETORNE em JSON com dados EXTRAÍDOS dos documentos:
+{{
+  "comparacao_lado_a_lado": [
+    {{
+      "item": "nome_equipamento_extraido_do_documento",
+      "quantidade": "quantidade_real_extraida",
+      "fornecedores": {{
+        "{fornecedores[0] if fornecedores else 'FORNECEDOR1'}": {{"valor": "valor_extraido", "especificacao": "spec_extraida"}},
+        "{fornecedores[1] if len(fornecedores) > 1 else 'FORNECEDOR2'}": {{"valor": "valor_extraido", "especificacao": "spec_extraida"}}
+      }},
+      "melhor_preco": "fornecedor_com_menor_valor",
+      "diferenca_valores": "diferenca_calculada"
+    }}
+  ],
+  "resumo_fornecedores": {{
+    "{fornecedores[0] if fornecedores else 'FORNECEDOR1'}": {{"valor_total_proposta": "valor_extraido", "total_itens": "numero_itens"}},
+    "{fornecedores[1] if len(fornecedores) > 1 else 'FORNECEDOR2'}": {{"valor_total_proposta": "valor_extraido", "total_itens": "numero_itens"}}
+  }},
+  "analise_tecnica": [
+    {{
+      "criterio": "criterio_avaliado",
+      "resultado": "conforme_ou_nao_conforme",
+      "detalhes": "detalhes_especificos_encontrados"
+    }}
+  ],
+  "recomendacoes": [
+    "Recomendação baseada nos dados REAIS encontrados nos documentos"
+  ]
+}}
+
+DADOS DOS DOCUMENTOS REAIS:
+"""
+    
+    # Adiciona dados do mapa se existir
+    if data['mapa_concorrencia']:
+        if data['mapa_concorrencia'].get('texto_completo'):
+            prompt += f"\nMAPA DE CONCORRÊNCIA:\n{limit_text(data['mapa_concorrencia']['texto_completo'])}"
+        elif data['mapa_concorrencia'].get('texto'):
+            prompt += f"\nMAPA DE CONCORRÊNCIA:\n{limit_text(data['mapa_concorrencia']['texto'])}"
+    
+    # Adiciona dados das propostas
+    for proposta in data['propostas']:
+        prompt += f"\n\n{proposta['fornecedor']} ({proposta['nome_arquivo']}):"
+        if proposta.get('texto_completo'):
+            prompt += f"\n{limit_text(proposta['texto_completo'])}"
+        elif proposta.get('texto'):
+            prompt += f"\n{limit_text(proposta['texto'])}"
+
     try:
-        file.seek(0)
-        df = pd.read_excel(file)
-        # Converte DataFrame para texto estruturado
-        text = f"Arquivo Excel com {len(df)} linhas e {len(df.columns)} colunas:\n\n"
-        text += f"Colunas: {', '.join(df.columns)}\n\n"
-        text += df.to_string(index=False)
-        return text
-    except Exception as e:
-        logger.error(f"Erro ao extrair dados do Excel: {e}")
-        return ""
-
-## Função para análise com OpenAI
-
-def truncate_text(text, max_tokens=12000):
-    """Trunca texto para não exceder o limite de tokens"""
-    # Estimativa: ~4 caracteres = 1 token
-    max_chars = max_tokens * 4
-    if len(text) > max_chars:
-        text = text[:max_chars] + "\n\n[... Texto truncado devido ao limite de tokens ...]"
-    return text
-
-def analyze_with_openai(documents_text, file_types):
-    """Analisa documentos usando OpenAI GPT"""
-    try:
-        if not openai.api_key:
-            logger.error("Chave da OpenAI não configurada")
-            return "❌ Erro: Chave da OpenAI não configurada. Configure corretamente o arquivo .env."
-        
-        # Trunca o texto dos documentos para evitar exceder limite de tokens
-        documents_text = truncate_text(documents_text, max_tokens=12000)
-        
-        system_prompt = """Você é um agente de suprimentos da Tools Engenharia especializado em análise de BID.
-        
-        Seu trabalho é seguir estas etapas:
-        
-        **Primeira Parte:**
-        - Avaliar se o mapa em Excel está igual às propostas
-        - Verificar se as propostas estão equalizadas
-        
-        **Segunda Etapa:**
-        - Avaliar se as propostas estão aderentes ao projeto
-        - Identificar inconsistências ou omissões
-        
-        **Terceira Etapa:**
-        - Montar uma base histórica com serviços já contratados para servir como referência
-        - Comparar com dados históricos quando disponível
-        
-        Para cada análise:
-        1. Confirme que o mapa foi recebido
-        2. Valide se contém: Itens e quantidades, Empresas participantes, Valores unitários
-        3. Compare valores unitários entre fornecedores
-        4. Identifique o menor preço por item
-        5. Avalie viabilidade de contratação por mix ou fornecedor único
-        6. Aponte inconsistências ou omissões
-        
-        Sua linguagem deve ser técnica e objetiva. Nunca assuma dados não fornecidos."""
-        
-        user_content = f"""Documentos recebidos para análise:
-        Tipos de arquivo: {', '.join(file_types)}
-        
-        Conteúdo dos documentos:
-        {documents_text}
-        
-        Por favor, realize a análise completa seguindo as três etapas definidas."""
-        
         response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4",
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
+                {
+                    "role": "system", 
+                    "content": "Você é um analista de suprimentos experiente. Extraia dados REAIS dos documentos fornecidos. NÃO invente valores ou informações. Analise apenas o que está escrito nos documentos. Responda APENAS com JSON válido."
+                },
+                {"role": "user", "content": prompt}
             ],
-            max_tokens=1500,
-            temperature=0.3
+            max_tokens=2500,
+            temperature=0.0  # Temperatura 0 para máxima precisão
         )
         
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        json_start = content.find('{')
+        json_end = content.rfind('}') + 1
         
+        if json_start != -1 and json_end > json_start:
+            json_str = content[json_start:json_end]
+            return json.loads(json_str)
+        else:
+            return {"erro": "GPT não retornou JSON válido", "resposta_bruta": content}
+            
     except Exception as e:
         logger.error(f"Erro na análise OpenAI: {e}")
-        return f"❌ Erro ao processar análise com IA: {str(e)}"
-
-def analyze_excel_content(file):
-    """Analisa conteúdo de arquivo Excel para identificar mapa de concorrência"""
-    try:
-        df = pd.read_excel(file)
-        
-        # Verifica se parece com um mapa de concorrência
-        columns = df.columns.str.lower()
-        
-        # Palavras-chave que indicam mapa de concorrência
-        keywords = ['item', 'descrição', 'quantidade', 'preço', 'valor', 'fornecedor', 'empresa']
-        found_keywords = [kw for kw in keywords if any(kw in col for col in columns)]
-        
-        validations = []
-        
-        if len(found_keywords) >= 3:
-            validations.append("✅ Estrutura de mapa de concorrência identificada")
-            validations.append(f"✅ Colunas relevantes encontradas: {', '.join(found_keywords)}")
-            validations.append(f"✅ Total de itens/linhas: {len(df)}")
-            
-            # Verifica se há dados numéricos (valores)
-            numeric_cols = df.select_dtypes(include=['number']).columns
-            if len(numeric_cols) > 0:
-                validations.append(f"✅ Colunas com valores numéricos: {len(numeric_cols)}")
-            else:
-                validations.append("⚠️ Poucas colunas numéricas identificadas")
-                
-            return True, validations
-        else:
-            validations.append("⚠️ Estrutura de mapa de concorrência não clara")
-            validations.append(f"⚠️ Apenas {len(found_keywords)} palavras-chave encontradas")
-            return False, validations
-            
-    except Exception as e:
-        logger.error(f"Erro ao analisar Excel: {e}")
-        return False, [f"❌ Erro ao processar arquivo Excel: {str(e)}"]
-
-def analyze_pdf_content(file):
-    """Analisa conteúdo de arquivo PDF"""
-    try:
-        text = extract_text_from_pdf(file)
-        file_size = len(file.getvalue())
-        
-        if file_size > 0 and text:
-            return True, [
-                "✅ Arquivo PDF recebido e processado",
-                f"✅ Tamanho: {file_size/1024:.1f} KB",
-                f"✅ Texto extraído: {len(text)} caracteres",
-                "✅ Pronto para análise com IA"
-            ]
-        else:
-            return False, ["❌ Arquivo PDF está vazio ou não foi possível extrair texto"]
-    except Exception as e:
-        logger.error(f"Erro ao analisar PDF: {e}")
-        return False, [f"❌ Erro ao processar arquivo PDF: {str(e)}"]
+        return {"erro": f"Erro ao processar análise com IA: {str(e)}"}
 
 def handle_uploaded_files(files):
-    """Processa e valida arquivos enviados pelo usuário"""
+    """Processa arquivos e retorna dados extraídos para revisão antes da IA"""
     if not files:
         return {
             "success": False,
             "message": "Nenhum arquivo enviado",
             "validations": [],
-            "ai_analysis": ""
+            "ai_analysis": "",
+            "structured_data": {}
         }
-    
-    all_validations = []
-    has_map = False
-    has_proposals = False
-    documents_text = ""
-    file_types = []
-    
-
+    validations = []
+    structured_data = {}
     for file in files:
-        file_name = file.name.lower()
-        file_extension = Path(file.name).suffix.lower()
-        file_types.append(f"{file.name} ({file_extension})")
+        ext = Path(file.name).suffix.lower()
+        if ext in [".xlsx", ".xls"]:
+            file.seek(0)
+            df = pd.read_excel(file)
+            structured_data[file.name] = df.to_string()
+            validations.append(f"✅ Excel extraído: {file.name}")
+        elif ext == ".pdf":
+            file.seek(0)
+            reader = PyPDF2.PdfReader(file)
+            text = ""
+            for page in reader.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+            structured_data[file.name] = text
+            validations.append(f"✅ PDF extraído: {file.name}")
+        else:
+            validations.append(f"⚠️ Tipo de arquivo não suportado: {file.name}")
+
+    # Aqui você pode enviar para a IA se quiser, mas o ideal é revisar antes
+    ai_result = ""  # Só envia para IA após revisão
+
+    return {
+        "success": True,
+        "message": "Arquivos extraídos para revisão!",
+        "validations": validations,
+        "ai_analysis": ai_result,
+        "structured_data": structured_data
+    }
+
+# Mantém as funções antigas para compatibilidade
+def extract_text_from_pdf(file, max_chars=4000):
+    """Função mantida para compatibilidade - usa a versão completa"""
+    return extract_text_from_pdf_complete(file)[:max_chars]
+
+def extract_data_from_excel(file, max_rows=50):
+    """Extrai dados estruturados de Excel com limite de linhas"""
+    try:
         file.seek(0)
+        df = pd.read_excel(file)
+        df = df.head(max_rows)
+        return df.to_dict(orient="records")
+    except Exception as e:
+        logger.error(f"Erro ao extrair dados do Excel: {e}")
+        return []
 
-        if not validate_file_type(file):
-            all_validations.append(f"❌ {file.name}: Tipo de arquivo não suportado")
-            continue
+def extract_structured_data(files):
+    """Função mantida para compatibilidade"""
+    return extract_structured_data_real(files)
 
-        all_validations.append(f"📁 Analisando: {file.name}")
-
-        mapa_validado = False
-        text_content = None
-        if file_extension in ['.xlsx', '.xls']:
-            text_content = extract_text_from_excel(file)
-            is_valid, validations = analyze_excel_content(file)
-            all_validations.extend(validations)
-
-            if is_valid or ('mapa' in file_name or 'concorrencia' in file_name):
-                has_map = True
-                mapa_validado = True
-                all_validations.append("🎯 Identificado como: MAPA DE CONCORRÊNCIA")
-            else:
-                has_proposals = True
-                all_validations.append("📋 Identificado como: PROPOSTA/DOCUMENTO AUXILIAR")
-
-        elif file_extension == '.pdf':
-            text_content = extract_text_from_pdf(file)
-            is_valid, validations = analyze_pdf_content(file)
-            all_validations.extend(validations)
-
-            if 'mapa' in file_name or 'concorrencia' in file_name:
-                has_map = True
-                mapa_validado = True
-                all_validations.append("🎯 Identificado como: MAPA DE CONCORRÊNCIA (PDF)")
-            else:
-                has_proposals = True
-                all_validations.append("📋 Identificado como: PROPOSTA/DOCUMENTO TÉCNICO")
-
-        if mapa_validado and not has_proposals:
-            all_validations.append("⚠️ Propostas comerciais não enviadas. Por favor, envie os arquivos de propostas para análise comparativa.")
-
-        if text_content:
-            documents_text += f"\n\n=== {file.name} ===\n{text_content}\n"
-
-        all_validations.append("---")
-
-    # Análise com IA
-    ai_analysis = ""
-    if documents_text:
-        all_validations.append("🤖 Iniciando análise com IA OpenAI...")
-        ai_analysis = analyze_with_openai(documents_text, file_types)
-
-    if not has_map:
-        return {
-            "success": False,
-            "message": "⚠️ MAPA DE CONCORRÊNCIA não identificado. Por favor, envie um arquivo contendo o mapa de concorrência com itens, quantidades e valores.",
-            "validations": all_validations,
-            "ai_analysis": ai_analysis
-        }
-
-    success_message = "✅ Documentos validados com sucesso!"
-    if has_proposals:
-        success_message += " Mapa de concorrência e propostas/documentos auxiliares identificados."
-    else:
-        success_message += " Mapa de concorrência identificado. Você pode enviar propostas comerciais adicionais para análise comparativa."
-
-    return {
-        "success": True,
-        "message": success_message,
-        "validations": all_validations,
-        "has_map": has_map,
-        "has_proposals": has_proposals,
-        "ai_analysis": ai_analysis
-    }
-    
-    # Análise com IA
-    ai_analysis = ""
-    if documents_text:
-        all_validations.append("🤖 Iniciando análise com IA OpenAI...")
-        ai_analysis = analyze_with_openai(documents_text, file_types)
-    
-    # Validação final
-    if not has_map:
-        return {
-            "success": False,
-            "message": "⚠️ MAPA DE CONCORRÊNCIA não identificado. Por favor, envie um arquivo contendo o mapa de concorrência com itens, quantidades e valores.",
-            "validations": all_validations,
-            "ai_analysis": ai_analysis
-        }
-    
-    # Sucesso na validação
-    success_message = "✅ Documentos validados com sucesso!"
-    if has_proposals:
-        success_message += " Mapa de concorrência e propostas/documentos auxiliares identificados."
-    else:
-        success_message += " Mapa de concorrência identificado. Você pode enviar propostas comerciais adicionais para análise comparativa."
-    
-    return {
-        "success": True,
-        "message": success_message,
-        "validations": all_validations,
-        "has_map": has_map,
-    "has_proposals": has_proposals,
-        "ai_analysis": ai_analysis
-    }
+def analyze_with_openai_structured(data):
+    """Função mantida para compatibilidade"""
+    return analyze_with_openai_real(data)
