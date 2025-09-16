@@ -29,70 +29,56 @@ st.markdown("""
         margin-bottom: 2rem;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
-    import streamlit as st
-    import pandas as pd
-    from utils.file_utils import extract_structured_data, analyze_with_openai_structured
-    from fpdf import FPDF
-    import io
+    .main-header h1 {
+        color: white;
+        margin: 0;
+        font-size: 2rem;
+        font-weight: 700;
+    }
+    .main-header h3 {
+        color: #f0f8f0;
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 400;
+    }
+    .ai-analysis {
+        background-color: #f8f9fa;
+        border-left: 4px solid #009e3c;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 5px;
+    }
+    .download-buttons {
+        display: flex;
+        gap: 10px;
+        margin: 20px 0;
+    }
+    .report-section {
+        background-color: #f8f9fa;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 20px 0;
+        border: 1px solid #dee2e6;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    st.set_page_config(page_title="Analisador de Propostas", layout="wide")
+st.markdown('<div style="margin-top: 10px; margin-bottom: 0px; text-align: center;">', unsafe_allow_html=True)
+st.image("utils/Logo Verde.png", width=180)
+st.markdown('<h3 style="margin-top: 0px; margin-bottom: 0px; color: #0e938e; font-weight: 600;">Agente de Suprimentos - Análise de BID</h3>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
+st.markdown('<div style="margin-top: 32px;"></div>', unsafe_allow_html=True)
 
-    st.title("Analisador de Propostas de Fornecedores")
+# Instruções do processo de análise
+st.markdown("""
+### 📝 Etapas do Processo de Análise
 
-    uploaded_files = st.file_uploader("Faça upload dos arquivos de proposta (PDF ou Excel)", type=["pdf", "xls", "xlsx"], accept_multiple_files=True)
+**Primeira Parte:**  
+Avaliar se o mapa em Excel ou PDF está igual às propostas e se as propostas estão equalizadas.
 
-    if uploaded_files:
-        with st.spinner("Extraindo dados das propostas..."):
-            result = extract_structured_data(uploaded_files)
-        if isinstance(result, dict):
-            data = result.get("data")
-            debug = result.get("debug")
-            st.subheader("Dados extraídos")
-            st.write(data)
-            st.expander("Debug").write(debug)
-            if st.button("Analisar com IA (GPT-4)"):
-                with st.spinner("Analisando com IA..."):
-                    ia_result = analyze_with_openai_structured(data)
-                if ia_result:
-                    st.subheader("Relatório Comparativo IA")
-                    # Exibir relatório lado a lado com destaques coloridos
-                    df = pd.DataFrame(ia_result)
-                    def highlight_best_worst(row):
-                        valor = row["Valor Unitário"]
-                        if valor == row["Melhor Valor"]:
-                            return ["background-color: #d4edda"] * len(row)
-                        elif valor == row["Pior Valor"]:
-                            return ["background-color: #f8d7da"] * len(row)
-                        else:
-                            return [""] * len(row)
-                    if "Melhor Valor" in df.columns and "Pior Valor" in df.columns:
-                        styled = df.style.apply(highlight_best_worst, axis=1)
-                    else:
-                        def highlight_col(val):
-                            if val == df["Valor Unitário"].min():
-                                return "background-color: #d4edda"
-                            elif val == df["Valor Unitário"].max():
-                                return "background-color: #f8d7da"
-                            return ""
-                        styled = df.style.applymap(highlight_col, subset=["Valor Unitário"])
-                    st.write(styled)
-                    st.markdown("---")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("Exportar Excel"):
-                            output = io.BytesIO()
-                            df.to_excel(output, index=False)
-                            st.download_button("Baixar Excel", data=output.getvalue(), file_name="relatorio_comparativo.xlsx")
-                    with col2:
-                        if st.button("Exportar PDF"):
-                            pdf = FPDF()
-                            pdf.add_page()
-                            pdf.set_font("Arial", size=12)
-                            for i, row in df.iterrows():
-                                linha = " | ".join([f"{col}: {row[col]}" for col in df.columns])
-                                pdf.cell(200, 10, txt=linha, ln=1)
-                            pdf_output = pdf.output(dest="S").encode("latin-1")
-                            st.download_button("Baixar PDF", data=pdf_output, file_name="relatorio_comparativo.pdf")
+**Segunda Etapa:**  
+Avaliar se as propostas estão aderentes ao projeto.
+
 **Terceira Etapa:**  
 Montar uma base histórica com serviços já contratados para servir como referência.
 
