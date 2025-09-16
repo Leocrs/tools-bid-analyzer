@@ -151,10 +151,77 @@ if uploaded_files:
 
         # Exibe resultado da IA se já foi gerado
         if "analysis_result_ia" in st.session_state:
-            if isinstance(st.session_state.analysis_result_ia, dict):
+            ia_result = st.session_state.analysis_result_ia
+            if isinstance(ia_result, dict):
                 st.success("✅ Análise da IA concluída!")
                 st.markdown("### 📊 Relatório Técnico gerado pela IA (OpenAI)")
-                st.json(st.session_state.analysis_result_ia)
+
+                # 1. Tabela comparativa dos itens
+                st.markdown("#### Comparação Lado a Lado dos Itens")
+                comparacao = ia_result.get("comparacao_lado_a_lado", [])
+                if comparacao:
+                    for item in comparacao:
+                        st.markdown(f"**{item.get('item','Item')}** | Quantidade: {item.get('quantidade','-')}")
+                        fornecedores = item.get("fornecedores", {})
+                        melhor = item.get("melhor_preco", "")
+                        # Descobre o pior valor
+                        valores = [(f, fornecedores[f]["valor"]) for f in fornecedores if "valor" in fornecedores[f]]
+                        if valores:
+                            pior = max(valores, key=lambda x: x[1])[0]
+                        else:
+                            pior = None
+                        cols = st.columns(len(fornecedores))
+                        for idx, (fornecedor, dados) in enumerate(fornecedores.items()):
+                            valor = dados.get("valor", "-")
+                            especificacao = dados.get("especificacao", "-")
+                            cor = "#009e3c" if fornecedor == melhor else ("#d32f2f" if fornecedor == pior else "#f8f9fa")
+                            # Formata valor apenas se for numérico
+                            if isinstance(valor, (int, float)):
+                                valor_fmt = f"{valor:,.2f}".replace(",", ".").replace(".", ",", 1)  # Formato brasileiro
+                            else:
+                                valor_fmt = str(valor)
+                            with cols[idx]:
+                                st.markdown(f"<div style='background:{cor};padding:10px;border-radius:8px;color:{'white' if cor in ['#009e3c','#d32f2f'] else 'black'}'>"
+                                            f"<b>{fornecedor}</b><br>"
+                                            f"<b>Valor:</b> R$ {valor_fmt}<br>"
+                                            f"<b>Especificação:</b> {especificacao}"
+                                            "</div>", unsafe_allow_html=True)
+                        diferenca = item.get('diferenca_valores','-')
+                        if isinstance(diferenca, (int, float)):
+                            diferenca_fmt = f"{diferenca:,.2f}".replace(",", ".").replace(".", ",", 1)
+                        else:
+                            diferenca_fmt = str(diferenca)
+                        st.markdown(f"<b>Melhor Preço:</b> <span style='color:#009e3c'>{melhor}</span> | <b>Pior Preço:</b> <span style='color:#d32f2f'>{pior}</span> | <b>Diferença:</b> R$ {diferenca_fmt}", unsafe_allow_html=True)
+                        st.markdown("---")
+
+                # 2. Resumo dos fornecedores
+                st.markdown("#### Resumo dos Fornecedores")
+                resumo = ia_result.get("resumo_fornecedores", {})
+                if resumo:
+                    cols = st.columns(len(resumo))
+                    for idx, (fornecedor, dados) in enumerate(resumo.items()):
+                        valor_total = dados.get("valor_total_proposta", "-")
+                        total_itens = dados.get("total_itens", "-")
+                        with cols[idx]:
+                            st.markdown(f"<div style='background:#f8f9fa;padding:10px;border-radius:8px;border:1px solid #dee2e6'>"
+                                        f"<b>{fornecedor}</b><br>"
+                                        f"<b>Valor Total:</b> {valor_total}<br>"
+                                        f"<b>Total de Itens:</b> {total_itens}"
+                                        "</div>", unsafe_allow_html=True)
+
+                # 3. Análise técnica
+                st.markdown("#### Análise Técnica")
+                analise = ia_result.get("analise_tecnica", [])
+                if analise:
+                    for criterio in analise:
+                        st.markdown(f"- <b>{criterio.get('criterio','')}</b>: {criterio.get('resultado','')}<br><i>{criterio.get('detalhes','')}</i>", unsafe_allow_html=True)
+
+                # 4. Recomendações
+                st.markdown("#### Recomendações da IA")
+                recomendacoes = ia_result.get("recomendacoes", [])
+                for rec in recomendacoes:
+                    st.markdown(f"<div style='background:#009e3c;color:white;padding:10px;border-radius:8px;margin-bottom:8px'><b>{rec}</b></div>", unsafe_allow_html=True)
+
             else:
                 st.error("❌ Erro na análise da IA")
                 st.write(st.session_state.analysis_result_ia)
