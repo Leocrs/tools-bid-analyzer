@@ -1,6 +1,6 @@
 import streamlit as st
 from pathlib import Path
-from utils.file_utils import handle_uploaded_files
+from utils.file_utils import handle_uploaded_files, analyze_with_openai_structured
 from utils.report_generator import BIDReportGenerator
 import pandas as pd
 import json  # Importado para usar o json.dumps
@@ -107,49 +107,65 @@ if uploaded_files:
     for file in uploaded_files:
         st.write(f"- **{file.name}** ({file.type}, {file.size/1024:.1f} KB)")
 
+
     if st.button("🔍 Solicitar Extração dos Dados", type="primary"):
         with st.spinner("🔄 Extraindo dados dos documentos..."):
             result = handle_uploaded_files(uploaded_files)
             st.session_state.analysis_result = result
 
-            if result["success"]:
-                st.success("✅ Extração concluída com sucesso!")
-                st.markdown("### 📋 Validação dos Documentos:")
-                for validation in result["validations"]:
-                    st.markdown(f"- {validation}")
+    # Exibe sempre que houver resultado de extração
+    if st.session_state.analysis_result and st.session_state.analysis_result["success"]:
+        st.success("✅ Extração concluída com sucesso!")
+        st.markdown("### 📋 Validação dos Documentos:")
+        for validation in st.session_state.analysis_result["validations"]:
+            st.markdown(f"- {validation}")
 
-                # Exibe texto extraído dos PDFs para revisão
-                st.markdown("### 📄 Texto extraído dos PDFs (pré-IA)")
-                for arquivo, texto in result["structured_data"].items():
-                    st.markdown(f"**{arquivo}**")
-                    st.text(texto[:2000])  # Mostra os primeiros 2000 caracteres do texto extraído
+        # Exibe texto extraído dos arquivos para revisão
+        st.markdown("### 📄 Texto extraído dos Documentos (pré-IA)")
+        # Mapa de concorrência
+        mapa = st.session_state.analysis_result["structured_data"].get("mapa_concorrencia")
+        if not isinstance(mapa, dict):
+            mapa = {}
+        if mapa.get("texto_completo"):
+            st.markdown(f"**{mapa.get('nome_arquivo', 'Mapa de Concorrência')}**")
+            st.text((mapa["texto_completo"] or "")[:2000])
+        # Propostas
+        for proposta in st.session_state.analysis_result["structured_data"].get("propostas", []):
+            st.markdown(f"**{proposta.get('nome_arquivo', 'Proposta')}**")
+            st.text((proposta.get("texto_completo") or "")[:2000])
 
-                st.info("Revise os dados extraídos acima. Se estiverem legíveis e completos, clique abaixo para análise com IA.")
+        st.info("Revise os dados extraídos acima. Se estiverem legíveis e completos, clique abaixo para análise com IA.")
 
-                # Botão para enviar para IA após revisão
-                if st.button("🚀 Analisar com IA"):
-                    with st.spinner("🤖 Realizando análise com IA..."):
-                        # Chame a função de análise com IA aqui, usando os dados extraídos
-                        # Exemplo: result_ia = analyze_with_openai_structured(result["structured_data"])
-                        # Adapte conforme sua função de análise
-                        result_ia = BIDReportGenerator().analyze_with_openai_structured(result["structured_data"])
-                        st.session_state.analysis_result_ia = result_ia
+        # Camada de debug visual
+        st.markdown("---")
+        st.markdown("#### � Debug IA - Status e Dados")
+        st.write("Dados enviados para IA:", st.session_state.analysis_result["structured_data"])
+        if "analysis_result_ia" in st.session_state:
+            st.write("Resultado IA:", st.session_state.analysis_result_ia)
 
-                        if isinstance(result_ia, dict):
-                            st.success("✅ Análise da IA concluída!")
-                            st.markdown("### 📊 Relatório Técnico gerado pela IA (OpenAI)")
-                            st.json(result_ia)
-                        else:
-                            st.error("❌ Erro na análise da IA")
-                            st.write(result_ia)
+        # Botão para enviar para IA após revisão
+        if st.button("🚀 Analisar com IA"):
+            with st.spinner("🤖 Realizando análise com IA..."):
+                result_ia = analyze_with_openai_structured(st.session_state.analysis_result["structured_data"])
+                st.session_state.analysis_result_ia = result_ia
 
-                st.session_state.analysis_completed = True
+        # Exibe resultado da IA se já foi gerado
+        if "analysis_result_ia" in st.session_state:
+            if isinstance(st.session_state.analysis_result_ia, dict):
+                st.success("✅ Análise da IA concluída!")
+                st.markdown("### 📊 Relatório Técnico gerado pela IA (OpenAI)")
+                st.json(st.session_state.analysis_result_ia)
             else:
-                st.error(result["message"])
-                if result["validations"]:
-                    st.markdown("### ⚠️ Detalhes:")
-                    for validation in result["validations"]:
-                        st.markdown(f"- {validation}")
+                st.error("❌ Erro na análise da IA")
+                st.write(st.session_state.analysis_result_ia)
+
+        st.session_state.analysis_completed = True
+    elif st.session_state.analysis_result and not st.session_state.analysis_result["success"]:
+        st.error(st.session_state.analysis_result["message"])
+        if st.session_state.analysis_result["validations"]:
+            st.markdown("### ⚠️ Detalhes:")
+            for validation in st.session_state.analysis_result["validations"]:
+                st.markdown(f"- {validation}")
 
 # Seção de Relatórios (só aparece após análise)
 

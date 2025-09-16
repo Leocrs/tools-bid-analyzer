@@ -252,28 +252,40 @@ def handle_uploaded_files(files):
             "structured_data": {}
         }
     validations = []
-    structured_data = {}
+    mapa_concorrencia = None
+    propostas = []
     for file in files:
         ext = Path(file.name).suffix.lower()
+        file.seek(0)
         if ext in [".xlsx", ".xls"]:
-            file.seek(0)
+            # Considera o primeiro Excel como mapa de concorrência
             df = pd.read_excel(file)
-            structured_data[file.name] = df.to_string()
+            texto = df.to_string()
+            mapa_concorrencia = {
+                "nome_arquivo": file.name,
+                "texto_completo": texto
+            }
             validations.append(f"✅ Excel extraído: {file.name}")
         elif ext == ".pdf":
-            file.seek(0)
-            reader = PyPDF2.PdfReader(file)
-            text = ""
-            for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-            structured_data[file.name] = text
+            try:
+                from PyPDF2 import PdfReader
+                reader = PdfReader(file)
+                texto = "\n".join(page.extract_text() or "" for page in reader.pages)
+            except Exception:
+                texto = "Erro ao extrair texto do PDF."
+            propostas.append({
+                "nome_arquivo": file.name,
+                "fornecedor": Path(file.name).stem,
+                "texto_completo": texto
+            })
             validations.append(f"✅ PDF extraído: {file.name}")
         else:
             validations.append(f"⚠️ Tipo de arquivo não suportado: {file.name}")
 
-    # Aqui você pode enviar para a IA se quiser, mas o ideal é revisar antes
+    structured_data = {
+        "mapa_concorrencia": mapa_concorrencia,
+        "propostas": propostas
+    }
     ai_result = ""  # Só envia para IA após revisão
 
     return {
@@ -305,5 +317,10 @@ def extract_structured_data(files):
     return extract_structured_data_real(files)
 
 def analyze_with_openai_structured(data):
-    """Função mantida para compatibilidade"""
-    return analyze_with_openai_real(data)
+    """
+    Função de análise IA estruturada: compara dados extraídos e gera relatório técnico lado a lado.
+    Utiliza o mesmo fluxo da função real, mas pode ser adaptada para customizações futuras.
+    """
+    resultado_ia = analyze_with_openai_real(data)
+    # Aqui, pode-se adicionar pós-processamento ou formatação extra se necessário
+    return resultado_ia
