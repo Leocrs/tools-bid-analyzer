@@ -140,178 +140,74 @@ def extract_structured_data_real(files):
 
 def analyze_with_openai_real(data):
     """Análise REAL dos documentos com comparação lado a lado"""
-    
-    # Prepara resumo dos fornecedores identificados
-    fornecedores = [p['fornecedor'] for p in data['propostas']]
-    
-    # Limita o texto para não exceder tokens
     def limit_text(text, max_chars=2000):
         return text[:max_chars] + "..." if len(text) > max_chars else text
-    
-    # Monta o prompt para análise REAL
     prompt = f"""
 ANÁLISE REAL DE PROPOSTAS - TOOLS ENGENHARIA
 
 Você recebeu documentos REAIS de:
 - MAPA: {data['mapa_concorrencia']['nome_arquivo'] if data['mapa_concorrencia'] else 'Não fornecido'}
-- FORNECEDORES: {', '.join(fornecedores)}
+- FORNECEDORES: {', '.join([p['fornecedor'] for p in data['propostas']])}
 
 TAREFA: Fazer comparação LADO A LADO entre os fornecedores identificados nos documentos.
 
-EXTRAIA dos documentos e COMPARE:
-1. Itens/equipamentos específicos de cada proposta
-2. Valores unitários e totais REAIS
-3. Marcas/especificações técnicas mencionadas
-4. Quantidades de cada item
-5. Condições comerciais (prazos, pagamento)
+EXTRAIA dos documentos e COMPARE, item a item, trazendo:
+- Quantidade
+- Modelo
+- Valor unitário
+- Valor total
+- Forma de pagamento
+- Proposta
+- Fornecedor
+- Especificação técnica
+- Para cada item, destaque o fornecedor com o menor valor (Mix de melhor preço)
 
-RETORNE em JSON com dados EXTRAÍDOS dos documentos:
-{{
-  "comparacao_lado_a_lado": [
-    {{
-      "item": "nome_equipamento_extraido_do_documento",
-      "quantidade": "quantidade_real_extraida",
-      "fornecedores": {{
-        "{fornecedores[0] if fornecedores else 'FORNECEDOR1'}": {{"valor": "valor_extraido", "especificacao": "spec_extraida"}},
-        "{fornecedores[1] if len(fornecedores) > 1 else 'FORNECEDOR2'}": {{"valor": "valor_extraido", "especificacao": "spec_extraida"}}
-      }},
-      "melhor_preco": "fornecedor_com_menor_valor",
-      "diferenca_valores": "diferenca_calculada"
-    }}
-  ],
-  "resumo_fornecedores": {{
-    "{fornecedores[0] if fornecedores else 'FORNECEDOR1'}": {{"valor_total_proposta": "valor_extraido", "total_itens": "numero_itens"}},
-    "{fornecedores[1] if len(fornecedores) > 1 else 'FORNECEDOR2'}": {{"valor_total_proposta": "valor_extraido", "total_itens": "numero_itens"}}
-  }},
-  "analise_tecnica": [
-    {{
-      "criterio": "criterio_avaliado",
-      "resultado": "conforme_ou_nao_conforme",
-      "detalhes": "detalhes_especificos_encontrados"
-    }}
-  ],
-  "recomendacoes": [
-    "Recomendação baseada nos dados REAIS encontrados nos documentos"
-  ]
-}}
+Organize o relatório em formato tabular ou cards, lado a lado, para facilitar a comparação visual.
+
+Ao final, gere um resumo do "Mix de melhor preço", indicando para cada item o fornecedor ideal e o valor, e o total do mix.
+
+RETORNE em JSON estruturado, com todos os campos encontrados nos documentos.
 
 DADOS DOS DOCUMENTOS REAIS:
 """
-    
-    # Adiciona dados do mapa se existir
     if data['mapa_concorrencia']:
         if data['mapa_concorrencia'].get('texto_completo'):
             prompt += f"\nMAPA DE CONCORRÊNCIA:\n{limit_text(data['mapa_concorrencia']['texto_completo'])}"
         elif data['mapa_concorrencia'].get('texto'):
             prompt += f"\nMAPA DE CONCORRÊNCIA:\n{limit_text(data['mapa_concorrencia']['texto'])}"
-    
-    # Adiciona dados das propostas
     for proposta in data['propostas']:
         prompt += f"\n\n{proposta['fornecedor']} ({proposta['nome_arquivo']}):"
         if proposta.get('texto_completo'):
             prompt += f"\n{limit_text(proposta['texto_completo'])}"
         elif proposta.get('texto'):
             prompt += f"\n{limit_text(proposta['texto'])}"
-
     try:
         response = openai.chat.completions.create(
             model="gpt-4",
             messages=[
                 {
-                    "role": "system", 
+                    "role": "system",
                     "content": "Você é um analista de suprimentos experiente. Extraia dados REAIS dos documentos fornecidos. NÃO invente valores ou informações. Analise apenas o que está escrito nos documentos. Responda APENAS com JSON válido."
                 },
                 {"role": "user", "content": prompt}
             ],
             max_tokens=2500,
-            temperature=0.0  # Temperatura 0 para máxima precisão
+            temperature=0.0
         )
-        
         content = response.choices[0].message.content
         json_start = content.find('{')
         json_end = content.rfind('}') + 1
-        
         if json_start != -1 and json_end > json_start:
             json_str = content[json_start:json_end]
             return json.loads(json_str)
         else:
             return {"erro": "GPT não retornou JSON válido", "resposta_bruta": content}
-            
-    except Exception as e:
-        logger.error(f"Erro na análise OpenAI: {e}")
-        return {"erro": f"Erro ao processar análise com IA: {str(e)}"}
-
-def handle_uploaded_files(files):
-    """Processa arquivos e retorna dados extraídos para revisão antes da IA"""
-    if not files:
-        return {
-            "success": False,
-            "message": "Nenhum arquivo enviado",
-            "validations": [],
-            "ai_analysis": "",
-            "structured_data": {}
-        }
-    validations = []
-    mapa_concorrencia = None
-    propostas = []
-    for file in files:
-        ext = Path(file.name).suffix.lower()
-        file.seek(0)
-        if ext in [".xlsx", ".xls"]:
-            # Considera o primeiro Excel como mapa de concorrência
-            df = pd.read_excel(file)
-            texto = df.to_string()
-            mapa_concorrencia = {
-                "nome_arquivo": file.name,
-                "texto_completo": texto
-            }
-            validations.append(f"✅ Excel extraído: {file.name}")
-        elif ext == ".pdf":
-            try:
-                from PyPDF2 import PdfReader
-                reader = PdfReader(file)
-                texto = "\n".join(page.extract_text() or "" for page in reader.pages)
-            except Exception:
-                texto = "Erro ao extrair texto do PDF."
-            propostas.append({
-                "nome_arquivo": file.name,
-                "fornecedor": Path(file.name).stem,
-                "texto_completo": texto
-            })
-            validations.append(f"✅ PDF extraído: {file.name}")
-        else:
-            validations.append(f"⚠️ Tipo de arquivo não suportado: {file.name}")
-
-    structured_data = {
-        "mapa_concorrencia": mapa_concorrencia,
-        "propostas": propostas
-    }
-    ai_result = ""  # Só envia para IA após revisão
-
-    return {
-        "success": True,
-        "message": "Arquivos extraídos para revisão!",
-        "validations": validations,
-        "ai_analysis": ai_result,
-        "structured_data": structured_data
-    }
-
-# Mantém as funções antigas para compatibilidade
-def extract_text_from_pdf(file, max_chars=4000):
-    """Função mantida para compatibilidade - usa a versão completa"""
-    return extract_text_from_pdf_complete(file)[:max_chars]
+    except Exception as exc:
+        logger.error(f"Erro na análise OpenAI: {exc}")
+        return {"erro": f"Erro ao processar análise com IA: {str(exc)}"}
 
 def extract_data_from_excel(file, max_rows=50):
-    """Extrai dados estruturados de Excel com limite de linhas"""
-    try:
-        file.seek(0)
-        df = pd.read_excel(file)
-        df = df.head(max_rows)
-        return df.to_dict(orient="records")
-    except Exception as e:
-        logger.error(f"Erro ao extrair dados do Excel: {e}")
-        return []
-
+    pass  # Função placeholder
 def extract_structured_data(files):
     """Função mantida para compatibilidade"""
     return extract_structured_data_real(files)
