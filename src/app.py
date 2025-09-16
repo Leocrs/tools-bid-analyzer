@@ -1,3 +1,9 @@
+import io
+import pandas as pd
+try:
+    from fpdf import FPDF
+except ImportError:
+    FPDF = None
 import streamlit as st
 from pathlib import Path
 from utils.file_utils import handle_uploaded_files, analyze_with_openai_structured
@@ -216,11 +222,70 @@ if uploaded_files:
                     for criterio in analise:
                         st.markdown(f"- <b>{criterio.get('criterio','')}</b>: {criterio.get('resultado','')}<br><i>{criterio.get('detalhes','')}</i>", unsafe_allow_html=True)
 
+
                 # 4. Recomendações
                 st.markdown("#### Recomendações da IA")
                 recomendacoes = ia_result.get("recomendacoes", [])
                 for rec in recomendacoes:
                     st.markdown(f"<div style='background:#009e3c;color:white;padding:10px;border-radius:8px;margin-bottom:8px'><b>{rec}</b></div>", unsafe_allow_html=True)
+
+                # 5. Botões de exportação
+                st.markdown("---")
+                st.markdown("### Exportar Relatório")
+                col1, col2 = st.columns(2)
+                # Excel
+                with col1:
+                    if st.button("📥 Exportar para Excel"):
+                        df = pd.DataFrame([{
+                            "Item": i.get("item",""),
+                            "Quantidade": i.get("quantidade",""),
+                            **{f"Valor {f}": d.get("valor","") for f, d in i.get("fornecedores",{}).items()},
+                            **{f"Especificação {f}": d.get("especificacao","") for f, d in i.get("fornecedores",{}).items()},
+                            "Melhor Preço": i.get("melhor_preco",""),
+                            "Pior Preço": max(i.get("fornecedores",{}), key=lambda x: i["fornecedores"][x].get("valor",0)) if i.get("fornecedores",{}) else "",
+                            "Diferença": i.get("diferenca_valores","")
+                        } for i in ia_result.get("comparacao_lado_a_lado",[])])
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            df.to_excel(writer, index=False, sheet_name='Comparativo')
+                        output.seek(0)
+                        st.download_button(
+                            label="Baixar Excel",
+                            data=output,
+                            file_name="relatorio_comparativo.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                # PDF
+                with col2:
+                    if FPDF is None:
+                        st.warning("Para exportar PDF, instale o pacote fpdf: pip install fpdf")
+                    elif st.button("📄 Exportar para PDF"):
+                        pdf = FPDF()
+                        pdf.add_page()
+                        pdf.set_font("Arial", size=12)
+                        pdf.cell(200, 10, txt="Relatório Técnico Comparativo", ln=True, align='C')
+                        pdf.ln(5)
+                        for i in ia_result.get("comparacao_lado_a_lado", []):
+                            pdf.set_font("Arial", style="B", size=11)
+                            pdf.cell(0, 8, txt=f"Item: {i.get('item','')} | Quantidade: {i.get('quantidade','')}", ln=True)
+                            pdf.set_font("Arial", size=10)
+                            for f, d in i.get("fornecedores",{}).items():
+                                pdf.cell(0, 7, txt=f"Fornecedor: {f} | Valor: R$ {d.get('valor','')} | Especificação: {d.get('especificacao','')}", ln=True)
+                            pdf.cell(0, 7, txt=f"Melhor Preço: {i.get('melhor_preco','')} | Diferença: R$ {i.get('diferenca_valores','')}", ln=True)
+                            pdf.ln(2)
+                        pdf.ln(5)
+                        pdf.set_font("Arial", style="B", size=11)
+                        pdf.cell(0, 8, txt="Recomendações:", ln=True)
+                        pdf.set_font("Arial", size=10)
+                        for rec in ia_result.get("recomendacoes", []):
+                            pdf.multi_cell(0, 7, txt=rec)
+                        pdf_output = pdf.output(dest='S').encode('latin1')
+                        st.download_button(
+                            label="Baixar PDF",
+                            data=pdf_output,
+                            file_name="relatorio_comparativo.pdf",
+                            mime="application/pdf"
+                        )
 
             else:
                 st.error("❌ Erro na análise da IA")
