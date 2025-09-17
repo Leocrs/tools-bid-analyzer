@@ -156,42 +156,47 @@ if uploaded_files:
     if st.session_state.analysis_result is not None:
         mapa = st.session_state.analysis_result.get("mapa_concorrencia", {})
         propostas = st.session_state.analysis_result.get("propostas", [])
-        comparacao = comparar_propostas(mapa, propostas)
-        st.success("✅ Relatório comparativo gerado!")
-        st.markdown("### 📊 Relatório Técnico Comparativo (Colorido)")
-        st.markdown("#### Comparação Lado a Lado dos Itens")
-        for item in comparacao:
-            st.markdown(f"**{item.get('item','Item')}** | Quantidade: {item.get('quantidade','-')}")
-            fornecedores = item.get("fornecedores", {})
-            melhor = item.get("melhor_preco", "")
-            valores = [(f, fornecedores[f]["valor"]) for f in fornecedores if isinstance(fornecedores[f]["valor"], (int, float))]
-            pior = max(valores, key=lambda x: x[1])[0] if valores else None
-            cols = st.columns(len(fornecedores))
-            for idx, (fornecedor, dados) in enumerate(fornecedores.items()):
-                valor = dados.get("valor", "-")
-                especificacao = dados.get("especificacao", "-")
-                cor = "#009e3c" if fornecedor == melhor else ("#d32f2f" if fornecedor == pior else "#f8f9fa")
-                if isinstance(valor, (int, float)):
-                    valor_fmt = f"{valor:,.2f}".replace(",", ".").replace(".", ",", 1)
-                else:
-                    valor_fmt = str(valor)
-                with cols[idx]:
-                    st.markdown(f"<div style='background:{cor};padding:10px;border-radius:8px;color:{'white' if cor in ['#009e3c','#d32f2f'] else 'black'}'>"
-                                f"<b>{fornecedor}</b><br>"
-                                f"<b>Valor:</b> R$ {valor_fmt}<br>"
-                                f"<b>Especificação:</b> {especificacao}"
-                                "</div>", unsafe_allow_html=True)
-            diferenca = item.get('diferenca_valores','-')
-            if isinstance(diferenca, (int, float)):
-                diferenca_fmt = f"{diferenca:,.2f}".replace(",", ".").replace(".", ",", 1)
+        if not mapa or not mapa.get("itens"):
+            st.warning("Por favor, insira o mapa de concorrência para realizar a análise comparativa.")
+        else:
+            comparacao = comparar_propostas(mapa, propostas)
+            if isinstance(comparacao, dict):
+                st.success("✅ Relatório comparativo gerado!")
+                st.markdown("### 📊 Relatório Técnico Comparativo (Colorido)")
+                st.markdown("#### Comparação Lado a Lado dos Itens")
+                for item in comparacao['resultado']:
+                    st.markdown(f"**{item.get('item','Item')}** | Quantidade: {item.get('quantidade','-')}")
+                    fornecedores = item.get("fornecedores", {})
+                    melhor = item.get("melhor_preco", "")
+                    valores = [(f, fornecedores[f]["valor"]) for f in fornecedores if isinstance(fornecedores[f]["valor"], (int, float))]
+                    pior = max(valores, key=lambda x: x[1])[0] if valores else None
+                    cols = st.columns(len(fornecedores))
+                    for idx, (fornecedor, dados) in enumerate(fornecedores.items()):
+                        valor = dados.get("valor", "-")
+                        especificacao = dados.get("especificacao", "-")
+                        cor = "#009e3c" if fornecedor == melhor else ("#d32f2f" if fornecedor == pior else "#f8f9fa")
+                        if isinstance(valor, (int, float)):
+                            valor_fmt = f"{valor:,.2f}".replace(",", ".").replace(".", ",", 1)
+                        else:
+                            valor_fmt = str(valor)
+                        with cols[idx]:
+                            st.markdown(f"<div style='background:{cor};padding:10px;border-radius:8px;color:{'white' if cor in ['#009e3c','#d32f2f'] else 'black'}'>"
+                                        f"<b>{fornecedor}</b><br>"
+                                        f"<b>Valor:</b> R$ {valor_fmt}<br>"
+                                        f"<b>Especificação:</b> {especificacao}"
+                                        "</div>", unsafe_allow_html=True)
+                    diferenca = item.get('diferenca_valores','-')
+                    if isinstance(diferenca, (int, float)):
+                        diferenca_fmt = f"{diferenca:,.2f}".replace(",", ".").replace(".", ",", 1)
+                    else:
+                        diferenca_fmt = str(diferenca)
+                    st.markdown(f"<b>Melhor Preço:</b> <span style='color:#009e3c'>{melhor}</span> | <b>Pior Preço:</b> <span style='color:#d32f2f'>{pior}</span> | <b>Diferença:</b> R$ {diferenca_fmt}", unsafe_allow_html=True)
+                    recomendacao = item.get('recomendacao', None)
+                    if recomendacao:
+                        st.markdown(f"<div style='background:#e3fcec;padding:8px;border-radius:6px;margin-top:4px;margin-bottom:4px;color:#333'><b>Sugestão:</b> {recomendacao}</div>", unsafe_allow_html=True)
+                    st.markdown("---")
             else:
-                diferenca_fmt = str(diferenca)
-            st.markdown(f"<b>Melhor Preço:</b> <span style='color:#009e3c'>{melhor}</span> | <b>Pior Preço:</b> <span style='color:#d32f2f'>{pior}</span> | <b>Diferença:</b> R$ {diferenca_fmt}", unsafe_allow_html=True)
-            # Exibe recomendação/sugestão para o item
-            recomendacao = item.get('recomendacao', None)
-            if recomendacao:
-                st.markdown(f"<div style='background:#e3fcec;padding:8px;border-radius:6px;margin-top:4px;margin-bottom:4px;color:#333'><b>Sugestão:</b> {recomendacao}</div>", unsafe_allow_html=True)
-            st.markdown("---")
+                st.error(comparacao[0].get('mensagem', 'Erro na análise comparativa.'))
     if "analysis_result_ia" in st.session_state:
         st.write("Resultado IA:", st.session_state.analysis_result_ia)
 

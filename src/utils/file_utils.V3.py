@@ -232,10 +232,10 @@ def analyze_with_openai_structured(data):
 
 # Função global para importação
 def comparar_propostas(mapa, propostas):
-    """Compara propostas e gera estrutura para relatório colorido"""
 
-
+    """Compara propostas, gera estrutura para relatório colorido, painel horizontal e mix de melhor preço"""
     import difflib
+    import pandas as pd
     if not mapa or not mapa.get("itens"):
         return [{
             "erro": True,
@@ -243,18 +243,23 @@ def comparar_propostas(mapa, propostas):
         }]
     itens_mapa = mapa.get("itens", [])
     resultado = []
+    painel = []
+    mix = []
     def normaliza(texto):
         return re.sub(r"\s+", "", texto).lower()
 
+    fornecedores_lista = [p.get("fornecedor", p.get("nome_arquivo", "Proposta")) for p in propostas]
+
     for item_nome in itens_mapa:
         fornecedores = {}
+        linha_painel = {"item": item_nome}
         item_norm = normaliza(item_nome)
+        valores_item = []
         for proposta in propostas:
             nome_forn = proposta.get("fornecedor", proposta.get("nome_arquivo", "Proposta"))
             valores = proposta.get("valores", [])
             itens = proposta.get("itens", [])
             valor = None
-            # Busca fuzzy entre item do mapa e itens extraídos da proposta
             melhor_score = 0
             melhor_idx = None
             for idx, item_prop in enumerate(itens):
@@ -265,13 +270,14 @@ def comparar_propostas(mapa, propostas):
                         melhor_score = score
                         melhor_idx = idx
             if melhor_idx is not None and melhor_idx < len(valores):
-                # Tenta pegar o valor correspondente ao índice do item
                 try:
                     valor_str = valores[melhor_idx]
                     valor = float(str(valor_str).replace(".","").replace(",","."))
                 except:
                     valor = valor_str
             fornecedores[nome_forn] = {"valor": valor if valor is not None else "-", "especificacao": item_nome}
+            linha_painel[nome_forn] = valor if valor is not None else "-"
+            valores_item.append(valor if valor is not None else float('inf'))
         valores_validos = [(f, d["valor"]) for f, d in fornecedores.items() if isinstance(d["valor"], (int, float))]
         melhor = min(valores_validos, key=lambda x: x[1])[0] if valores_validos else None
         pior = max(valores_validos, key=lambda x: x[1])[0] if valores_validos else None
@@ -296,4 +302,19 @@ def comparar_propostas(mapa, propostas):
             "diferenca_valores": diferenca,
             "recomendacao": recomendacao
         })
-    return resultado
+        # Painel horizontal
+        linha_painel["melhor_preco"] = melhor
+        linha_painel["pior_preco"] = pior
+        painel.append(linha_painel)
+        # Mix de melhor preço
+        if melhor:
+            melhor_valor = fornecedores[melhor]["valor"]
+            mix.append({"item": item_nome, "melhor_fornecedor": melhor, "melhor_valor": melhor_valor})
+        else:
+            mix.append({"item": item_nome, "melhor_fornecedor": None, "melhor_valor": None})
+    # Retorna resultado detalhado, painel horizontal e mix
+    return {
+        "resultado": resultado,
+        "painel": painel,
+        "mix_melhor_preco": mix
+    }
