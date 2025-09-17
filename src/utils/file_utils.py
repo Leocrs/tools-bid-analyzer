@@ -52,37 +52,46 @@ def identify_supplier_from_filename(filename):
 
 def extract_values_from_text(text):
     """Extrai valores monetários do texto"""
-    # Padrões para valores em reais
+    # Padrões para valores monetários (apenas valores com vírgula e dois dígitos)
     patterns = [
-        r'R\$\s*([\d.,]+)',
-        r'(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)',
-        r'TOTAL[:\s]*([\d.,]+)',
-        r'VALOR[:\s]*([\d.,]+)'
+        r'R\$\s*([\d\.]+,\d{2})',
+        r'(\d{1,3}(?:\.\d{3})*,\d{2})',
+        r'TOTAL[:\s]*([\d\.]+,\d{2})',
+        r'VALOR[:\s]*([\d\.]+,\d{2})'
     ]
-    
     values = []
     for pattern in patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         values.extend(matches)
-    
     return values
 
 def extract_items_from_text(text):
     """Extrai itens/equipamentos do texto"""
-    # Padrões comuns para equipamentos de ar condicionado
+    # Padrões expandidos para capturar formatos diversos
     patterns = [
         r'UE-\d+[A-Z]?\s*-[^-\n]+',  # Padrão UE-01A - DESCRIÇÃO
         r'SPLIT\s+\d+[.,]?\d*\s*BTU[/H]*',
         r'CASSETE\s+\d+[.,]?\d*\s*BTU[/H]*',
         r'HI\s*WALL\s+\d+[.,]?\d*\s*BTU[/H]*',
-        r'DUTO\s+\d+[.,]?\d*\s*BTU[/H]*'
+        r'DUTO\s+\d+[.,]?\d*\s*BTU[/H]*',
+        r'Suite\s*\d+',
+        r'Casal',
+        r'Ginastica',
+        r'Home',
+        r'Jantar/Copa',
+        r'Escritório',
+        r'Cozinha',
+        r'Gourmet',
+        r'FXEQ\d+AVE',
+        r'FXFQ\d+AVM',
+        r'FXSQ\d+PAVE',
+        r'FXAQ\d+AVM',
+        r'Exaustor',
     ]
-    
     items = []
     for pattern in patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         items.extend(matches)
-    
     return list(set(items))  # Remove duplicatas
 
 def extract_structured_data_real(files):
@@ -225,7 +234,13 @@ def analyze_with_openai_structured(data):
 def comparar_propostas(mapa, propostas):
     """Compara propostas e gera estrutura para relatório colorido"""
 
+
     import difflib
+    if not mapa or not mapa.get("itens"):
+        return [{
+            "erro": True,
+            "mensagem": "Por favor inserir o mapa de concorrência para realizar a análise comparativa."
+        }]
     itens_mapa = mapa.get("itens", [])
     resultado = []
     def normaliza(texto):
@@ -236,29 +251,26 @@ def comparar_propostas(mapa, propostas):
         item_norm = normaliza(item_nome)
         for proposta in propostas:
             nome_forn = proposta.get("fornecedor", proposta.get("nome_arquivo", "Proposta"))
-            texto = proposta.get("texto_completo", "")
+            valores = proposta.get("valores", [])
+            itens = proposta.get("itens", [])
             valor = None
-            # Busca fuzzy: encontra a substring mais próxima do item
-            linhas = texto.splitlines()
+            # Busca fuzzy entre item do mapa e itens extraídos da proposta
             melhor_score = 0
-            melhor_linha = None
-            for linha in linhas:
-                linha_norm = normaliza(linha)
-                score = difflib.SequenceMatcher(None, item_norm, linha_norm).ratio()
-                if item_norm in linha_norm or score > 0.7:
+            melhor_idx = None
+            for idx, item_prop in enumerate(itens):
+                item_prop_norm = normaliza(item_prop)
+                score = difflib.SequenceMatcher(None, item_norm, item_prop_norm).ratio()
+                if item_norm in item_prop_norm or score > 0.7:
                     if score > melhor_score:
                         melhor_score = score
-                        melhor_linha = linha
-            if melhor_linha:
-                # Busca valor na linha ou nas próximas 2 linhas
-                idx = linhas.index(melhor_linha)
-                trecho = "\n".join(linhas[idx:idx+3])
-                match = re.search(r"R\$\s?([\d\.,]+)", trecho)
-                if match:
-                    try:
-                        valor = float(match.group(1).replace(".","").replace(",","."))
-                    except:
-                        valor = match.group(1)
+                        melhor_idx = idx
+            if melhor_idx is not None and melhor_idx < len(valores):
+                # Tenta pegar o valor correspondente ao índice do item
+                try:
+                    valor_str = valores[melhor_idx]
+                    valor = float(str(valor_str).replace(".","").replace(",","."))
+                except:
+                    valor = valor_str
             fornecedores[nome_forn] = {"valor": valor if valor is not None else "-", "especificacao": item_nome}
         valores_validos = [(f, d["valor"]) for f, d in fornecedores.items() if isinstance(d["valor"], (int, float))]
         melhor = min(valores_validos, key=lambda x: x[1])[0] if valores_validos else None

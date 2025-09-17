@@ -147,7 +147,10 @@ if uploaded_files:
         # Camada de debug visual
         st.markdown("---")
         st.markdown("#### � Debug IA - Status e Dados")
-    st.write("Dados enviados para IA:", st.session_state.analysis_result)
+    if st.session_state.analysis_result is not None:
+        st.write("Dados enviados para IA:", st.session_state.analysis_result)
+    else:
+        st.write("Nenhum dado extraído ainda.")
 
     # NOVO: Relatório colorido lado a lado sem IA
     if st.session_state.analysis_result is not None:
