@@ -224,21 +224,42 @@ def analyze_with_openai_structured(data):
 # Função global para importação
 def comparar_propostas(mapa, propostas):
     """Compara propostas e gera estrutura para relatório colorido"""
+
+    import difflib
     itens_mapa = mapa.get("itens", [])
     resultado = []
+    def normaliza(texto):
+        return re.sub(r"\s+", "", texto).lower()
+
     for item_nome in itens_mapa:
         fornecedores = {}
+        item_norm = normaliza(item_nome)
         for proposta in propostas:
             nome_forn = proposta.get("fornecedor", proposta.get("nome_arquivo", "Proposta"))
             texto = proposta.get("texto_completo", "")
             valor = None
-            if item_nome in texto:
-                idx = texto.find(item_nome)
-                trecho = texto[idx:idx+200]
-                match = re.search(r"(R\$\s?)([\d\.,]+)", trecho)
+            # Busca fuzzy: encontra a substring mais próxima do item
+            linhas = texto.splitlines()
+            melhor_score = 0
+            melhor_linha = None
+            for linha in linhas:
+                linha_norm = normaliza(linha)
+                score = difflib.SequenceMatcher(None, item_norm, linha_norm).ratio()
+                if item_norm in linha_norm or score > 0.7:
+                    if score > melhor_score:
+                        melhor_score = score
+                        melhor_linha = linha
+            if melhor_linha:
+                # Busca valor na linha ou nas próximas 2 linhas
+                idx = linhas.index(melhor_linha)
+                trecho = "\n".join(linhas[idx:idx+3])
+                match = re.search(r"R\$\s?([\d\.,]+)", trecho)
                 if match:
-                    valor = float(match.group(2).replace(".","").replace(",","."))
-            fornecedores[nome_forn] = {"valor": valor if valor else "-", "especificacao": item_nome}
+                    try:
+                        valor = float(match.group(1).replace(".","").replace(",","."))
+                    except:
+                        valor = match.group(1)
+            fornecedores[nome_forn] = {"valor": valor if valor is not None else "-", "especificacao": item_nome}
         valores_validos = [(f, d["valor"]) for f, d in fornecedores.items() if isinstance(d["valor"], (int, float))]
         melhor = min(valores_validos, key=lambda x: x[1])[0] if valores_validos else None
         pior = max(valores_validos, key=lambda x: x[1])[0] if valores_validos else None
