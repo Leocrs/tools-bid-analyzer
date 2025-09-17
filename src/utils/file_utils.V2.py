@@ -220,3 +220,47 @@ def analyze_with_openai_structured(data):
     resultado_ia = analyze_with_openai_real(data)
     # Aqui, pode-se adicionar pós-processamento ou formatação extra se necessário
     return resultado_ia
+
+# Função global para importação
+def comparar_propostas(mapa, propostas):
+    """Compara propostas e gera estrutura para relatório colorido"""
+    itens_mapa = mapa.get("itens", [])
+    resultado = []
+    for item_nome in itens_mapa:
+        fornecedores = {}
+        for proposta in propostas:
+            nome_forn = proposta.get("fornecedor", proposta.get("nome_arquivo", "Proposta"))
+            texto = proposta.get("texto_completo", "")
+            valor = None
+            if item_nome in texto:
+                idx = texto.find(item_nome)
+                trecho = texto[idx:idx+200]
+                match = re.search(r"(R\$\s?)([\d\.,]+)", trecho)
+                if match:
+                    valor = float(match.group(2).replace(".","").replace(",","."))
+            fornecedores[nome_forn] = {"valor": valor if valor else "-", "especificacao": item_nome}
+        valores_validos = [(f, d["valor"]) for f, d in fornecedores.items() if isinstance(d["valor"], (int, float))]
+        melhor = min(valores_validos, key=lambda x: x[1])[0] if valores_validos else None
+        pior = max(valores_validos, key=lambda x: x[1])[0] if valores_validos else None
+        diferenca = None
+        recomendacao = ""
+        if melhor and pior:
+            diferenca = fornecedores[pior]["valor"] - fornecedores[melhor]["valor"]
+            if diferenca > 0:
+                if diferenca > 1000:
+                    recomendacao = f"Grande diferença de preço entre fornecedores. Recomenda-se negociar com {melhor} para o item '{item_nome}' devido ao melhor preço."
+                else:
+                    recomendacao = f"{melhor} apresenta o melhor preço para o item '{item_nome}'. Recomenda-se priorizar este fornecedor."
+            else:
+                recomendacao = f"Os preços estão próximos entre os fornecedores para o item '{item_nome}'. Avalie outros critérios além do preço."
+        else:
+            recomendacao = f"Não foi possível comparar preços para o item '{item_nome}'. Verifique se os dados extraídos estão completos."
+        resultado.append({
+            "item": item_nome,
+            "quantidade": "-",
+            "fornecedores": fornecedores,
+            "melhor_preco": melhor,
+            "diferenca_valores": diferenca,
+            "recomendacao": recomendacao
+        })
+    return resultado
