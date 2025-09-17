@@ -164,13 +164,13 @@ if uploaded_files:
                 st.success("✅ Relatório comparativo gerado!")
                 st.markdown("### 📊 Relatório Técnico Comparativo (Colorido)")
                 st.markdown("#### Comparação Lado a Lado dos Itens")
-                for item in comparacao['resultado']:
+                for item, mix_item in zip(comparacao['resultado'], comparacao['mix_melhor_preco']):
                     st.markdown(f"**{item.get('item','Item')}** | Quantidade: {item.get('quantidade','-')}")
                     fornecedores = item.get("fornecedores", {})
                     melhor = item.get("melhor_preco", "")
                     valores = [(f, fornecedores[f]["valor"]) for f in fornecedores if isinstance(fornecedores[f]["valor"], (int, float))]
                     pior = max(valores, key=lambda x: x[1])[0] if valores else None
-                    cols = st.columns(len(fornecedores))
+                    cols = st.columns(len(fornecedores)+1)
                     for idx, (fornecedor, dados) in enumerate(fornecedores.items()):
                         valor = dados.get("valor", "-")
                         especificacao = dados.get("especificacao", "-")
@@ -185,6 +185,19 @@ if uploaded_files:
                                         f"<b>Valor:</b> R$ {valor_fmt}<br>"
                                         f"<b>Especificação:</b> {especificacao}"
                                         "</div>", unsafe_allow_html=True)
+                    # Coluna extra: melhor fornecedor do mix
+                    with cols[-1]:
+                        mix_forn = mix_item.get('melhor_fornecedor', '-')
+                        mix_valor = mix_item.get('melhor_valor', '-')
+                        if isinstance(mix_valor, (int, float)):
+                            mix_valor_fmt = f"{mix_valor:,.2f}".replace(",", ".").replace(".", ",", 1)
+                        else:
+                            mix_valor_fmt = str(mix_valor)
+                        st.markdown(f"<div style='background:#e3fcec;padding:10px;border-radius:8px;color:#333'>"
+                                    f"<b>Melhor Fornecedor</b><br>"
+                                    f"<b>{mix_forn}</b><br>"
+                                    f"<b>Valor:</b> R$ {mix_valor_fmt}"
+                                    "</div>", unsafe_allow_html=True)
                     diferenca = item.get('diferenca_valores','-')
                     if isinstance(diferenca, (int, float)):
                         diferenca_fmt = f"{diferenca:,.2f}".replace(",", ".").replace(".", ",", 1)
@@ -195,6 +208,23 @@ if uploaded_files:
                     if recomendacao:
                         st.markdown(f"<div style='background:#e3fcec;padding:8px;border-radius:6px;margin-top:4px;margin-bottom:4px;color:#333'><b>Sugestão:</b> {recomendacao}</div>", unsafe_allow_html=True)
                     st.markdown("---")
+                # Exibe o mix de melhor preço geral
+                st.markdown("#### 🏆 Mix de Melhor Preço por Item")
+                st.table([{ 'Item': m['item'], 'Melhor Fornecedor': m['melhor_fornecedor'], 'Valor': m['melhor_valor'] } for m in comparacao['mix_melhor_preco']])
+                # Resumo final: ranking dos fornecedores pelo valor total
+                st.markdown("#### 🏅 Ranking dos Fornecedores pelo Valor Total")
+                ranking = {}
+                for item in comparacao['resultado']:
+                    for f, d in item['fornecedores'].items():
+                        if isinstance(d['valor'], (int, float)):
+                            ranking[f] = ranking.get(f, 0) + d['valor']
+                ranking_ord = sorted(ranking.items(), key=lambda x: x[1])
+                st.table([{ 'Fornecedor': f, 'Valor Total': v } for f, v in ranking_ord])
+                # Exibe condições de pagamento e descontos se existirem
+                st.markdown("#### 💳 Condições de Pagamento e Descontos")
+                for proposta in propostas:
+                    cond = proposta.get('texto_completo','')
+                    st.markdown(f"<div style='background:#f4f4f4;padding:8px;border-radius:6px;margin-bottom:4px;color:#333'><b>{proposta.get('fornecedor',proposta.get('nome_arquivo','Proposta'))}</b><br>{cond}</div>", unsafe_allow_html=True)
             else:
                 st.error(comparacao[0].get('mensagem', 'Erro na análise comparativa.'))
     if "analysis_result_ia" in st.session_state:
