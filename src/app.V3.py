@@ -225,6 +225,61 @@ if uploaded_files:
                 for proposta in propostas:
                     cond = proposta.get('texto_completo','')
                     st.markdown(f"<div style='background:#f4f4f4;padding:8px;border-radius:6px;margin-bottom:4px;color:#333'><b>{proposta.get('fornecedor',proposta.get('nome_arquivo','Proposta'))}</b><br>{cond}</div>", unsafe_allow_html=True)
+
+                # Botões de exportação Excel e PDF
+                st.markdown("---")
+                st.markdown("### Exportar Relatório")
+                import pandas as pd
+                from io import BytesIO
+                import base64
+                # Monta DataFrame do resultado
+                df_result = pd.DataFrame([
+                    {
+                        'Item': item.get('item',''),
+                        **{f: item['fornecedores'][f]['valor'] for f in item['fornecedores']},
+                        'Melhor Fornecedor': item.get('melhor_preco',''),
+                        'Pior Fornecedor': (
+                            max(
+                                [f for f in item['fornecedores'] if isinstance(item['fornecedores'][f]['valor'], (int, float))],
+                                key=lambda f: item['fornecedores'][f]['valor']
+                            ) if any(isinstance(item['fornecedores'][f]['valor'], (int, float)) for f in item['fornecedores']) else ''
+                        ),
+                        'Diferença': item.get('diferenca_valores','')
+                    }
+                    for item in comparacao['resultado']
+                ])
+                # Exportar Excel
+                output_excel = BytesIO()
+                df_result.to_excel(output_excel, index=False)
+                output_excel.seek(0)
+                b64_excel = base64.b64encode(output_excel.read()).decode()
+                href_excel = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_excel}" download="relatorio_comparativo.xlsx">📥 Baixar Excel</a>'
+                st.markdown(href_excel, unsafe_allow_html=True)
+                # Exportar PDF (simples, via HTML)
+                try:
+                    from fpdf import FPDF
+                    pdf = FPDF()
+                    pdf.add_page()
+                    pdf.set_font("Arial", size=12)
+                    pdf.cell(200, 10, txt="Relatório Comparativo de Propostas", ln=True, align='C')
+                    pdf.ln(10)
+                    # Cabeçalho
+                    colunas = df_result.columns.tolist()
+                    for col in colunas:
+                        pdf.cell(40, 10, col, border=1)
+                    pdf.ln()
+                    # Dados
+                    for i, row in df_result.iterrows():
+                        for col in colunas:
+                            valor = str(row[col])
+                            pdf.cell(40, 10, valor, border=1)
+                        pdf.ln()
+                    pdf_bytes = pdf.output(dest='S').encode('latin1')
+                    b64_pdf = base64.b64encode(pdf_bytes).decode()
+                    href_pdf = f'<a href="data:application/pdf;base64,{b64_pdf}" download="relatorio_comparativo.pdf">📥 Baixar PDF</a>'
+                    st.markdown(href_pdf, unsafe_allow_html=True)
+                except Exception as e:
+                    st.info("PDF não disponível: instale a biblioteca fpdf (pip install fpdf) para exportar.")
             else:
                 st.error(comparacao[0].get('mensagem', 'Erro na análise comparativa.'))
     if "analysis_result_ia" in st.session_state:
