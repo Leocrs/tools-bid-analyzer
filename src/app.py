@@ -283,7 +283,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div style="margin-top: 10px; margin-bottom: 0px; text-align: center;">', unsafe_allow_html=True)
-st.image("src/utils/Logo Verde.png", width=180)
+st.image("./src/utils/Logo Verde.png", width=180)
 st.markdown('<h3 style="margin-top: 0px; margin-bottom: 0px; color: #0e938e; font-weight: 600;">Agente de Suprimentos - Análise de BID</h3>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div style="margin-top: 32px;"></div>', unsafe_allow_html=True)
