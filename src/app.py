@@ -1,4 +1,14 @@
 import io
+import streamlit as st
+
+# Inicializar variáveis de sessão no topo
+if 'analysis_completed' not in st.session_state:
+    st.session_state.analysis_completed = False
+if 'analysis_result' not in st.session_state:
+    st.session_state.analysis_result = None
+if 'report_data' not in st.session_state:
+    st.session_state.report_data = None
+
 import pandas as pd
 try:
     from fpdf import FPDF
@@ -9,6 +19,215 @@ from pathlib import Path
 from utils.file_utils import extract_structured_data, analyze_with_openai_structured, comparar_propostas
 from utils.report_generator import BIDReportGenerator
 import pandas as pd
+
+def exibir_tabelas_estruturadas():
+    """Exibe tabelas estruturadas separadas para mapa e propostas"""
+    if not st.session_state.analysis_result:
+        st.warning("Nenhum dado para exibir. Faça o upload dos arquivos primeiro.")
+        return
+    
+    # Obtém os DataFrames estruturados
+    dataframes = st.session_state.analysis_result.get("dataframes", {})
+    mapa_df = dataframes.get("mapa_df")
+    propostas_dfs = dataframes.get("propostas_dfs", [])
+    
+    # Exibe Mapa de Concorrência
+    st.subheader("📋 MAPA DE CONCORRÊNCIA")
+    if mapa_df is not None and not mapa_df.empty:
+        st.dataframe(
+            mapa_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Nome_Proposta": "Nome da Proposta",
+                "Numero_Proposta": "Nº Proposta",
+                "Empresa_Participante": "Empresa",
+                "Modelo_Produto": "Modelo",
+                "Item": "Descrição do Item",
+                "Quantidade": st.column_config.NumberColumn("Qtd.", format="%.0f"),
+                "Unidade": "Un.",
+                "Custo_Unitario": st.column_config.NumberColumn("Custo Unit. (R$)", format="R$ %.2f"),
+                "Custo_Total": st.column_config.NumberColumn("Custo Total (R$)", format="R$ %.2f"),
+                "Status_Equalizacao": "Status"
+            }
+        )
+        st.info(f"📊 Total de itens no mapa: {len(mapa_df)}")
+    else:
+        st.warning("⚠️ Mapa de concorrência não encontrado ou vazio.")
+    
+    # Exibe Propostas Separadamente
+    st.subheader("📄 PROPOSTAS ANALISADAS")
+    
+    if propostas_dfs and len(propostas_dfs) > 0:
+        # Cria abas para cada proposta
+        propostas_info = st.session_state.analysis_result.get("propostas", [])
+        
+        if len(propostas_dfs) == 1:
+            # Se só há uma proposta, exibe diretamente
+            proposta_df = propostas_dfs[0]
+            proposta_info = propostas_info[0] if propostas_info else {}
+            
+            nome_fornecedor = proposta_info.get("fornecedor", "Fornecedor")
+            nome_arquivo = proposta_info.get("nome_arquivo", "Arquivo")
+            
+            st.write(f"**{nome_fornecedor}** - `{nome_arquivo}`")
+            
+            if proposta_df is not None and not proposta_df.empty:
+                st.dataframe(
+                    proposta_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Nome_Proposta": "Nome da Proposta",
+                        "Numero_Proposta": "Nº Proposta",
+                        "Empresa_Participante": "Empresa",
+                        "Modelo_Produto": "Modelo",
+                        "Item": "Descrição do Item",
+                        "Quantidade": st.column_config.NumberColumn("Qtd.", format="%.0f"),
+                        "Unidade": "Un.",
+                        "Custo_Unitario": st.column_config.NumberColumn("Custo Unit. (R$)", format="R$ %.2f"),
+                        "Custo_Total": st.column_config.NumberColumn("Custo Total (R$)", format="R$ %.2f"),
+                        "Status_Equalizacao": "Status"
+                    }
+                )
+                st.info(f"📊 Total de itens na proposta: {len(proposta_df)}")
+            else:
+                st.warning("⚠️ Dados da proposta não puderam ser processados.")
+        else:
+            # Múltiplas propostas - usa abas
+            tabs = st.tabs([
+                f"{propostas_info[i].get('fornecedor', f'Proposta {i+1}')}" 
+                for i in range(len(propostas_dfs))
+            ])
+            
+            for i, (tab, proposta_df) in enumerate(zip(tabs, propostas_dfs)):
+                with tab:
+                    proposta_info = propostas_info[i] if i < len(propostas_info) else {}
+                    nome_arquivo = proposta_info.get("nome_arquivo", "Arquivo")
+                    
+                    st.write(f"📄 Arquivo: `{nome_arquivo}`")
+                    
+                    if proposta_df is not None and not proposta_df.empty:
+                        st.dataframe(
+                            proposta_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Nome_Proposta": "Nome da Proposta",
+                                "Numero_Proposta": "Nº Proposta",
+                                "Empresa_Participante": "Empresa",
+                                "Modelo_Produto": "Modelo",
+                                "Item": "Descrição do Item",
+                                "Quantidade": st.column_config.NumberColumn("Qtd.", format="%.0f"),
+                                "Unidade": "Un.",
+                                "Custo_Unitario": st.column_config.NumberColumn("Custo Unit. (R$)", format="R$ %.2f"),
+                                "Custo_Total": st.column_config.NumberColumn("Custo Total (R$)", format="R$ %.2f"),
+                                "Status_Equalizacao": "Status"
+                            }
+                        )
+                        st.info(f"📊 Total de itens: {len(proposta_df)}")
+                    else:
+                        st.warning("⚠️ Dados da proposta não puderam ser processados.")
+    else:
+        st.warning("⚠️ Nenhuma proposta encontrada.")
+
+def exibir_analise_equalizada():
+    """Exibe resultado da análise de equalização"""
+    if not hasattr(st.session_state, 'analise_ia_result') or not st.session_state.analise_ia_result:
+        return
+    
+    analise = st.session_state.analise_ia_result
+    
+    if analise.get("erro"):
+        st.error(f"❌ Erro na análise: {analise.get('mensagem', 'Erro desconhecido')}")
+        return
+    
+    st.subheader("🎯 RESULTADO DA ANÁLISE DE EQUALIZAÇÃO")
+    
+    # Resumo da equalização
+    resumo = analise.get("resumo_equalizacao", {})
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("📄 Total de Propostas", resumo.get("total_propostas", 0))
+    with col2:
+        st.metric("✅ Itens Equalizados", resumo.get("itens_equalizados", 0))
+    with col3:
+        st.metric("❌ Itens Não Equalizados", resumo.get("itens_nao_equalizados", 0))
+    
+    # Exibe propostas equalizadas
+    propostas_analisadas = analise.get("propostas_analisadas", [])
+    
+    if propostas_analisadas:
+        st.subheader("📊 PROPOSTAS COM STATUS DE EQUALIZAÇÃO")
+        
+        for proposta in propostas_analisadas:
+            if not proposta.get("erro"):
+                with st.expander(f"🏢 {proposta.get('fornecedor', 'Fornecedor')} - {proposta.get('nome_arquivo', 'Arquivo')}"):
+                    
+                    # Métricas da proposta
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("✅ Equalizados", proposta.get("itens_equalizados", 0))
+                    with col2:
+                        st.metric("❌ Não Equalizados", proposta.get("itens_nao_equalizados", 0))
+                    
+                    # DataFrame equalizado
+                    df_equalizado = proposta.get("dataframe_equalizado")
+                    if df_equalizado is not None and not df_equalizado.empty:
+                        st.dataframe(
+                            df_equalizado,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Status_Equalizacao": st.column_config.TextColumn(
+                                    "Status",
+                                    help="Status de equalização do item"
+                                )
+                            }
+                        )
+                    
+                    # Observações
+                    observacoes = proposta.get("observacoes", [])
+                    if observacoes:
+                        st.write("📝 **Observações:**")
+                        for obs in observacoes:
+                            st.write(f"• **{obs.get('item', 'Item')}**: {obs.get('motivo', 'N/A')}")
+    
+    # Mix de melhor preço
+    mix = analise.get("mix_melhor_preco", {})
+    if mix and not mix.get("erro"):
+        st.subheader("💰 MIX DE MELHOR PREÇO")
+        
+        itens_mix = mix.get("itens", [])
+        if itens_mix:
+            # Cria DataFrame do mix
+            dados_mix = []
+            for item in itens_mix:
+                dados_mix.append({
+                    "Item": item.get("item", "N/A"),
+                    "Fornecedor": item.get("fornecedor_selecionado", "N/A"),
+                    "Custo": item.get("custo", 0)
+                })
+            
+            df_mix = pd.DataFrame(dados_mix)
+            st.dataframe(
+                df_mix,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Custo": st.column_config.NumberColumn("Custo (R$)", format="R$ %.2f")
+                }
+            )
+            
+            total_mix = mix.get("total", 0)
+            st.success(f"💰 **Total do Mix de Melhor Preço: R$ {total_mix:,.2f}**")
+
+# Mantém a função original para compatibilidade (será removida gradualmente)
+def exibir_tabela_extraida():
+    """Função mantida para compatibilidade - será removida em versões futuras"""
+    st.warning("Esta função está sendo descontinuada. Use 'exibir_tabelas_estruturadas()' no lugar.")
+    exibir_tabelas_estruturadas()
 import json  # Importado para usar o json.dumps
 
 # Configuração da página
@@ -64,27 +283,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div style="margin-top: 10px; margin-bottom: 0px; text-align: center;">', unsafe_allow_html=True)
-st.image("utils/Logo Verde.png", width=180)
+st.image("src/utils/Logo Verde.png", width=180)
 st.markdown('<h3 style="margin-top: 0px; margin-bottom: 0px; color: #0e938e; font-weight: 600;">Agente de Suprimentos - Análise de BID</h3>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div style="margin-top: 32px;"></div>', unsafe_allow_html=True)
 
 # Instruções do processo de análise
-st.markdown("""
-### 📝 Etapas do Processo de Análise
-
-**Primeira Parte:**  
-Avaliar se o mapa em Excel ou PDF está igual às propostas e se as propostas estão equalizadas.
-
-**Segunda Etapa:**  
-Avaliar se as propostas estão aderentes ao projeto.
-
-**Terceira Etapa:**  
-Montar uma base histórica com serviços já contratados para servir como referência.
-
-**🤖 IA utilizada:**  
-OpenAI GPT-4 para análise automática e inteligente dos documentos de BID.
-""")
 
 # Inicializar variáveis de sessão
 if 'analysis_completed' not in st.session_state:
@@ -119,6 +323,7 @@ if uploaded_files:
             result = extract_structured_data(uploaded_files)
             st.session_state.analysis_result = result
 
+
     # Exibe sempre que houver resultado de extração
     if st.session_state.analysis_result and isinstance(st.session_state.analysis_result, dict):
         st.success("✅ Extração concluída com sucesso!")
@@ -128,29 +333,8 @@ if uploaded_files:
             for validation in st.session_state.analysis_result["validations"]:
                 st.markdown(f"- {validation}")
 
-        # Exibe texto extraído dos arquivos para revisão
-        st.markdown("### 📄 Texto extraído dos Documentos (pré-IA)")
-        # Mapa de concorrência
-        mapa = st.session_state.analysis_result.get("mapa_concorrencia")
-        if not isinstance(mapa, dict):
-            mapa = {}
-        if mapa.get("texto_completo"):
-            st.markdown(f"**{mapa.get('nome_arquivo', 'Mapa de Concorrência')}**")
-            st.text((mapa["texto_completo"] or "")[:2000])
-        # Propostas
-        for proposta in st.session_state.analysis_result.get("propostas", []):
-            st.markdown(f"**{proposta.get('nome_arquivo', 'Proposta')}**")
-            st.text((proposta.get("texto_completo") or "")[:2000])
-
-        st.info("Revise os dados extraídos acima. Se estiverem legíveis e completos, clique abaixo para análise com IA.")
-
-        # Camada de debug visual
-        st.markdown("---")
-        st.markdown("#### � Debug IA - Status e Dados")
-    if st.session_state.analysis_result is not None:
-        st.write("Dados enviados para IA:", st.session_state.analysis_result)
-    else:
-        st.write("Nenhum dado extraído ainda.")
+        # Exibe as tabelas estruturadas separadas
+        exibir_tabelas_estruturadas()
 
     # NOVO: Relatório colorido lado a lado sem IA
     if st.session_state.analysis_result is not None:
@@ -162,55 +346,35 @@ if uploaded_files:
             comparacao = comparar_propostas(mapa, propostas)
             if isinstance(comparacao, dict):
                 st.success("✅ Relatório comparativo gerado!")
-                st.markdown("### 📊 Relatório Técnico Comparativo (Colorido)")
-                st.markdown("#### Comparação Lado a Lado dos Itens")
+                st.markdown("### 📊 Relatório Técnico Comparativo")
+                # Monta DataFrame para o relatório técnico comparativo
+                import pandas as pd
+                tabela_comparativa = []
                 for item, mix_item in zip(comparacao['resultado'], comparacao['mix_melhor_preco']):
-                    st.markdown(f"**{item.get('item','Item')}** | Quantidade: {item.get('quantidade','-')}")
                     fornecedores = item.get("fornecedores", {})
-                    melhor = item.get("melhor_preco", "")
-                    valores = [(f, fornecedores[f]["valor"]) for f in fornecedores if isinstance(fornecedores[f]["valor"], (int, float))]
-                    pior = max(valores, key=lambda x: x[1])[0] if valores else None
-                    cols = st.columns(len(fornecedores)+1)
-                    for idx, (fornecedor, dados) in enumerate(fornecedores.items()):
-                        valor = dados.get("valor", "-")
-                        especificacao = dados.get("especificacao", "-")
-                        cor = "#009e3c" if fornecedor == melhor else ("#d32f2f" if fornecedor == pior else "#f8f9fa")
-                        if isinstance(valor, (int, float)):
-                            valor_fmt = f"{valor:,.2f}".replace(",", ".").replace(".", ",", 1)
-                        else:
-                            valor_fmt = str(valor)
-                        with cols[idx]:
-                            st.markdown(f"<div style='background:{cor};padding:10px;border-radius:8px;color:{'white' if cor in ['#009e3c','#d32f2f'] else 'black'}'>"
-                                        f"<b>{fornecedor}</b><br>"
-                                        f"<b>Valor:</b> R$ {valor_fmt}<br>"
-                                        f"<b>Especificação:</b> {especificacao}"
-                                        "</div>", unsafe_allow_html=True)
-                    # Coluna extra: melhor fornecedor do mix
-                    with cols[-1]:
-                        mix_forn = mix_item.get('melhor_fornecedor', '-')
-                        mix_valor = mix_item.get('melhor_valor', '-')
-                        if isinstance(mix_valor, (int, float)):
-                            mix_valor_fmt = f"{mix_valor:,.2f}".replace(",", ".").replace(".", ",", 1)
-                        else:
-                            mix_valor_fmt = str(mix_valor)
-                        st.markdown(f"<div style='background:#e3fcec;padding:10px;border-radius:8px;color:#333'>"
-                                    f"<b>Melhor Fornecedor</b><br>"
-                                    f"<b>{mix_forn}</b><br>"
-                                    f"<b>Valor:</b> R$ {mix_valor_fmt}"
-                                    "</div>", unsafe_allow_html=True)
-                    diferenca = item.get('diferenca_valores','-')
-                    if isinstance(diferenca, (int, float)):
-                        diferenca_fmt = f"{diferenca:,.2f}".replace(",", ".").replace(".", ",", 1)
-                    else:
-                        diferenca_fmt = str(diferenca)
-                    st.markdown(f"<b>Melhor Preço:</b> <span style='color:#009e3c'>{melhor}</span> | <b>Pior Preço:</b> <span style='color:#d32f2f'>{pior}</span> | <b>Diferença:</b> R$ {diferenca_fmt}", unsafe_allow_html=True)
-                    recomendacao = item.get('recomendacao', None)
-                    if recomendacao:
-                        st.markdown(f"<div style='background:#e3fcec;padding:8px;border-radius:6px;margin-top:4px;margin-bottom:4px;color:#333'><b>Sugestão:</b> {recomendacao}</div>", unsafe_allow_html=True)
-                    st.markdown("---")
-                # Exibe o mix de melhor preço geral
-                st.markdown("#### 🏆 Mix de Melhor Preço por Item")
-                st.table([{ 'Item': m['item'], 'Melhor Fornecedor': m['melhor_fornecedor'], 'Valor': m['melhor_valor'] } for m in comparacao['mix_melhor_preco']])
+                    for fornecedor, dados in fornecedores.items():
+                        linha = {
+                            "Item": item.get("item", ""),
+                            "Qtd.": item.get("quantidade", ""),
+                            "Fabricante": dados.get("fabricante", fornecedor),
+                            "Modelo": dados.get("modelo_produto", dados.get("modelo", "")),
+                            "Fornecedor": fornecedor,
+                            "Valor Uni (R$)": dados.get("valor", ""),
+                            "Especificação": dados.get("especificacao", ""),
+                            "Melhor Preço": item.get("melhor_preco", ""),
+                            "Pior Preço": (
+                                max(
+                                    [f for f in fornecedores if isinstance(fornecedores[f].get("valor",0), (int, float)) or str(fornecedores[f].get("valor",0)).replace(',','').replace('.','').isdigit()],
+                                    key=lambda x: float(str(fornecedores[x].get("valor",0)).replace('.','').replace(',','.')) if str(fornecedores[x].get("valor",0)).replace(',','').replace('.','').isdigit() else 0
+                                ) if [f for f in fornecedores if isinstance(fornecedores[f].get("valor",0), (int, float)) or str(fornecedores[f].get("valor",0)).replace(',','').replace('.','').isdigit()] else ""
+                            ) if fornecedores else "",
+                            "Diferença": item.get("diferenca_valores", ""),
+                            "Sugestão": item.get("recomendacao", "")
+                        }
+                        tabela_comparativa.append(linha)
+                df_comparativo = pd.DataFrame(tabela_comparativa)
+                st.dataframe(df_comparativo, use_container_width=True)
+                # Removido Mix de Melhor Preço por Item
                 # Resumo final: ranking dos fornecedores pelo valor total
                 st.markdown("#### 🏅 Ranking dos Fornecedores pelo Valor Total")
                 ranking = {}
@@ -220,11 +384,7 @@ if uploaded_files:
                             ranking[f] = ranking.get(f, 0) + d['valor']
                 ranking_ord = sorted(ranking.items(), key=lambda x: x[1])
                 st.table([{ 'Fornecedor': f, 'Valor Total': v } for f, v in ranking_ord])
-                # Exibe condições de pagamento e descontos se existirem
-                st.markdown("#### 💳 Condições de Pagamento e Descontos")
-                for proposta in propostas:
-                    cond = proposta.get('texto_completo','')
-                    st.markdown(f"<div style='background:#f4f4f4;padding:8px;border-radius:6px;margin-bottom:4px;color:#333'><b>{proposta.get('fornecedor',proposta.get('nome_arquivo','Proposta'))}</b><br>{cond}</div>", unsafe_allow_html=True)
+                # Removido Condições de Pagamento e Descontos
 
                 # Botões de exportação Excel e PDF
                 st.markdown("---")
@@ -285,149 +445,30 @@ if uploaded_files:
     if "analysis_result_ia" in st.session_state:
         st.write("Resultado IA:", st.session_state.analysis_result_ia)
 
-        # Botão para enviar para IA após revisão
-        if st.button("🚀 Analisar com IA"):
-            with st.spinner("🤖 Realizando análise com IA..."):
+        # Botão para realizar análise de equalização
+        if st.button("🎯 Analisar Equalização"):
+            with st.spinner("⚙️ Realizando análise de equalização..."):
                 result_ia = analyze_with_openai_structured(st.session_state.analysis_result)
-                st.session_state.analysis_result_ia = result_ia
+                st.session_state.analise_ia_result = result_ia
 
-        # Exibe resultado da IA se já foi gerado
-        if "analysis_result_ia" in st.session_state:
-            ia_result = st.session_state.analysis_result_ia
-            if isinstance(ia_result, dict):
-                st.success("✅ Análise da IA concluída!")
-                st.markdown("### 📊 Relatório Técnico gerado pela IA (OpenAI)")
+        # Exibe resultado da análise de equalização
+        if hasattr(st.session_state, 'analise_ia_result') and st.session_state.analise_ia_result:
+            exibir_analise_equalizada()
 
-            # 1. Tabela comparativa dos itens
-            st.markdown("#### Comparação Lado a Lado dos Itens")
-            comparacao = ia_result.get("comparacao_lado_a_lado", [])
-            if comparacao:
-                for item in comparacao:
-                    st.markdown(f"**{item.get('item','Item')}** | Quantidade: {item.get('quantidade','-')}")
-                    fornecedores = item.get("fornecedores", {})
-                    melhor = item.get("melhor_preco", "")
-                    # Descobre o pior valor
-                    valores = [(f, fornecedores[f]["valor"]) for f in fornecedores if "valor" in fornecedores[f]]
-                    if valores:
-                        pior = max(valores, key=lambda x: x[1])[0]
-                    else:
-                        pior = None
-                    cols = st.columns(len(fornecedores))
-                    for idx, (fornecedor, dados) in enumerate(fornecedores.items()):
-                        valor = dados.get("valor", "-")
-                        especificacao = dados.get("especificacao", "-")
-                        cor = "#009e3c" if fornecedor == melhor else ("#d32f2f" if fornecedor == pior else "#f8f9fa")
-                        # Formata valor apenas se for numérico
-                        if isinstance(valor, (int, float)):
-                            valor_fmt = f"{valor:,.2f}".replace(",", ".").replace(".", ",", 1)  # Formato brasileiro
-                        else:
-                            valor_fmt = str(valor)
-                        with cols[idx]:
-                            st.markdown(f"<div style='background:{cor};padding:10px;border-radius:8px;color:{'white' if cor in ['#009e3c','#d32f2f'] else 'black'}'>"
-                                        f"<b>{fornecedor}</b><br>"
-                                        f"<b>Valor:</b> R$ {valor_fmt}<br>"
-                                        f"<b>Especificação:</b> {especificacao}"
-                                        "</div>", unsafe_allow_html=True)
-                    diferenca = item.get('diferenca_valores','-')
-                    if isinstance(diferenca, (int, float)):
-                        diferenca_fmt = f"{diferenca:,.2f}".replace(",", ".").replace(".", ",", 1)
-                    else:
-                        diferenca_fmt = str(diferenca)
-                    st.markdown(f"<b>Melhor Preço:</b> <span style='color:#009e3c'>{melhor}</span> | <b>Pior Preço:</b> <span style='color:#d32f2f'>{pior}</span> | <b>Diferença:</b> R$ {diferenca_fmt}", unsafe_allow_html=True)
-                    st.markdown("---")
-
-            # 2. Resumo dos fornecedores
-            st.markdown("#### Resumo dos Fornecedores")
-            resumo = ia_result.get("resumo_fornecedores", {})
-            if resumo:
-                cols = st.columns(len(resumo))
-                for idx, (fornecedor, dados) in enumerate(resumo.items()):
-                    valor_total = dados.get("valor_total_proposta", "-")
-                    total_itens = dados.get("total_itens", "-")
-                    with cols[idx]:
-                        st.markdown(f"<div style='background:#f8f9fa;padding:10px;border-radius:8px;border:1px solid #dee2e6'>"
-                                    f"<b>{fornecedor}</b><br>"
-                                    f"<b>Valor Total:</b> {valor_total}<br>"
-                                    f"<b>Total de Itens:</b> {total_itens}"
-                                    "</div>", unsafe_allow_html=True)
-
-            # 3. Análise técnica
-            st.markdown("#### Análise Técnica")
-            analise = ia_result.get("analise_tecnica", [])
-            if analise:
-                for criterio in analise:
-                    st.markdown(f"- <b>{criterio.get('criterio','')}</b>: {criterio.get('resultado','')}<br><i>{criterio.get('detalhes','')}</i>", unsafe_allow_html=True)
-
-            # 4. Recomendações
-            st.markdown("#### Recomendações da IA")
-            recomendacoes = ia_result.get("recomendacoes", [])
-            for rec in recomendacoes:
-                st.markdown(f"<div style='background:#009e3c;color:white;padding:10px;border-radius:8px;margin-bottom:8px'><b>{rec}</b></div>", unsafe_allow_html=True)
-
-            # 5. Botões de exportação
-            st.markdown("---")
-            st.markdown("### Exportar Relatório")
-            col1, col2 = st.columns(2)
-            # Excel
-            with col1:
-                if st.button("📥 Exportar para Excel"):
-                    df = pd.DataFrame([{
-                        "Item": i.get("item",""),
-                        "Quantidade": i.get("quantidade",""),
-                        **{f"Valor {f}": d.get("valor","") for f, d in i.get("fornecedores",{}).items()},
-                        **{f"Especificação {f}": d.get("especificacao","") for f, d in i.get("fornecedores",{}).items()},
-                        "Melhor Preço": i.get("melhor_preco",""),
-                        "Pior Preço": max(i.get("fornecedores",{}), key=lambda x: i["fornecedores"][x].get("valor",0)) if i.get("fornecedores",{}) else "",
-                        "Diferença": i.get("diferenca_valores","")
-                    } for i in ia_result.get("comparacao_lado_a_lado",[])])
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df.to_excel(writer, index=False, sheet_name='Comparativo')
-                    output.seek(0)
-                    st.download_button(
-                        label="Baixar Excel",
-                        data=output,
-                        file_name="relatorio_comparativo.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-            # PDF
-            with col2:
-                if FPDF is None:
-                    st.warning("Para exportar PDF, instale o pacote fpdf: pip install fpdf")
-                elif st.button("📄 Exportar para PDF"):
-                    pdf = FPDF()
-                    pdf.add_page()
-                    pdf.set_font("Arial", size=12)
-                    pdf.cell(200, 10, txt="Relatório Técnico Comparativo", ln=True, align='C')
-                    pdf.ln(5)
-                    for i in ia_result.get("comparacao_lado_a_lado", []):
-                        pdf.set_font("Arial", style="B", size=11)
-                        pdf.cell(0, 8, txt=f"Item: {i.get('item','')} | Quantidade: {i.get('quantidade','')}", ln=True)
-                        pdf.set_font("Arial", size=10)
-                        for f, d in i.get("fornecedores",{}).items():
-                            pdf.cell(0, 7, txt=f"Fornecedor: {f} | Valor: R$ {d.get('valor','')} | Especificação: {d.get('especificacao','')}", ln=True)
-                        pdf.cell(0, 7, txt=f"Melhor Preço: {i.get('melhor_preco','')} | Diferença: R$ {i.get('diferenca_valores','')}", ln=True)
-                        pdf.ln(2)
-                    pdf.ln(5)
-                    pdf.set_font("Arial", style="B", size=11)
-                    pdf.cell(0, 8, txt="Recomendações:", ln=True)
-                    pdf.set_font("Arial", size=10)
-                    for rec in ia_result.get("recomendacoes", []):
-                        pdf.multi_cell(0, 7, txt=rec)
-                    pdf_output = pdf.output(dest='S').encode('latin1')
-                    st.download_button(
-                        label="Baixar PDF",
-                        data=pdf_output,
-                        file_name="relatorio_comparativo.pdf",
-                        mime="application/pdf"
-                    )
-        else:
-            st.error("❌ Erro na análise da IA")
-            st.write(st.session_state.analysis_result_ia)
-
-        st.session_state.analysis_completed = True
-
-# Seção de Relatórios (só aparece após análise)
+# Seção de Relatórios - mantida após análise
+if st.session_state.get('analysis_completed', False) or st.session_state.get('analise_ia_result'):
+    st.markdown("---")
+    st.subheader("📊 RELATÓRIOS E EXPORTAÇÕES")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("📥 Exportar para Excel"):
+            st.info("Funcionalidade de exportação será implementada em breve.")
+    
+    with col2:
+        if st.button("📄 Gerar Relatório PDF"):
+            st.info("Funcionalidade de relatório PDF será implementada em breve.")
 
 # Rodapé
 st.markdown("---")
