@@ -43,7 +43,6 @@ def identify_supplier_from_filename(filename):
     elif "mapa" in filename_lower:
         return "MAPA_CONCORRENCIA"
     else:
-        # Tenta extrair nome da empresa do início do arquivo
         parts = filename.split(' - ')
         if len(parts) > 0:
             potential_company = parts[0].strip().upper()
@@ -52,7 +51,6 @@ def identify_supplier_from_filename(filename):
 
 def extract_values_from_text(text):
     """Extrai valores monetários do texto"""
-    # Padrões para valores monetários (apenas valores com vírgula e dois dígitos)
     patterns = [
         r'R\$\s*([\d\.]+,\d{2})',
         r'(\d{1,3}(?:\.\d{3})*,\d{2})',
@@ -67,9 +65,8 @@ def extract_values_from_text(text):
 
 def extract_items_from_text(text):
     """Extrai itens/equipamentos do texto"""
-    # Padrões expandidos para capturar formatos diversos
     patterns = [
-        r'UE-\d+[A-Z]?\s*-[^-\n]+',  # Padrão UE-01A - DESCRIÇÃO
+        r'UE-\d+[A-Z]?\s*-[^-\n]+',
         r'SPLIT\s+\d+[.,]?\d*\s*BTU[/H]*',
         r'CASSETE\s+\d+[.,]?\d*\s*BTU[/H]*',
         r'HI\s*WALL\s+\d+[.,]?\d*\s*BTU[/H]*',
@@ -92,23 +89,29 @@ def extract_items_from_text(text):
     for pattern in patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         items.extend(matches)
-    return list(set(items))  # Remove duplicatas
+    return list(set(items))
+
+def validar_dados_extraidos(data):
+    """Valida os dados extraídos para garantir que estão completos e consistentes."""
+    if not data.get('mapa_concorrencia') or not data.get('propostas'):
+        return False, "Dados incompletos ou ausentes."
+    # Verifica se todos os campos obrigatórios estão presentes nas propostas
+    for proposta in data.get('propostas', []):
+        # Verifica se há pelo menos um valor e um item
+        if not proposta.get('nome_arquivo') or not proposta.get('valores'):
+            return False, f"Proposta '{proposta.get('nome_arquivo')}' inválida. Campos obrigatórios ausentes."
+    return True, "Dados validados com sucesso."
 
 def extract_structured_data_real(files):
-    """Extrai dados REAIS e estruturados dos arquivos"""
+    """Extrai dados reais e estruturados dos arquivos, com validação."""
     data = {
         "mapa_concorrencia": None,
         "propostas": []
     }
-    
     for file in files:
         supplier = identify_supplier_from_filename(file.name)
-        
-        # Determina se é Excel ou PDF
         ext = Path(file.name).suffix.lower()
-        
         if ext in [".xlsx", ".xls"]:
-            # Para Excel, extrai como DataFrame
             try:
                 file.seek(0)
                 df = pd.read_excel(file)
@@ -123,7 +126,6 @@ def extract_structured_data_real(files):
                 logger.error(f"Erro ao processar Excel {file.name}: {e}")
                 content = {"tipo": "excel", "erro": str(e)}
         else:
-            # Para PDF, extrai texto completo
             full_text = extract_text_from_pdf_complete(file)
             content = {
                 "tipo": "pdf",
@@ -131,7 +133,6 @@ def extract_structured_data_real(files):
                 "valores": extract_values_from_text(full_text),
                 "itens": extract_items_from_text(full_text)
             }
-        
         if supplier == "MAPA_CONCORRENCIA":
             data["mapa_concorrencia"] = {
                 "nome_arquivo": file.name,
@@ -144,7 +145,10 @@ def extract_structured_data_real(files):
                 "fornecedor": supplier,
                 **content
             })
-    
+    # Validação dos dados extraídos
+    validado, mensagem = validar_dados_extraidos(data)
+    if not validado:
+        return {"erro": True, "mensagem": mensagem}
     return data
 
 def analyze_with_openai_real(data):
