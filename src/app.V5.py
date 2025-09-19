@@ -114,7 +114,7 @@ if uploaded_files:
     
     if st.button("🔍 Solicitar Extração dos Dados", type="primary"):
         with st.spinner("🔄 Extraindo dados dos documentos..."):
-            result = extract_structured_data_real(uploaded_files)
+            result = extract_structured_data(uploaded_files)
             if 'erro' in result:
                 st.error(f"❌ Erro: {result.get('mensagem')}")
             else:

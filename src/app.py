@@ -1,5 +1,6 @@
 import io
 import streamlit as st
+from pathlib import Path
 
 # Inicializar variáveis de sessão no topo
 if 'analysis_completed' not in st.session_state:
@@ -283,7 +284,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div style="margin-top: 10px; margin-bottom: 0px; text-align: center;">', unsafe_allow_html=True)
-st.image("./src/utils/Logo Verde.png", width=180)
+# Caminho robusto para a imagem
+# Obtém o diretório atual do script
+current_dir = Path(__file__).parent
+logo_path = current_dir / "utils" / "Logo Verde.png"
+
+if logo_path.exists():
+    st.image(str(logo_path), width=180)
+else:
+    st.write("🔨 TOOLS")  # Fallback caso a imagem não seja encontrada
 st.markdown('<h3 style="margin-top: 0px; margin-bottom: 0px; color: #0e938e; font-weight: 600;">Agente de Suprimentos - Análise de BID</h3>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div style="margin-top: 32px;"></div>', unsafe_allow_html=True)
